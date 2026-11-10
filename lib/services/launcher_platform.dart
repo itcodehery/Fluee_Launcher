@@ -217,6 +217,42 @@ class LauncherPlatform {
     }
   }
 
+  Future<bool> isAirplaneModeOn() async {
+    try {
+      final res = await _method.invokeMethod<bool>('isAirplaneModeOn');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isWifiEnabled() async {
+    try {
+      final res = await _method.invokeMethod<bool>('isWifiEnabled');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isAutoRotateOn() async {
+    try {
+      final res = await _method.invokeMethod<bool>('isAutoRotateOn');
+      return res ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<bool> isDndOn() async {
+    try {
+      final res = await _method.invokeMethod<bool>('isDndOn');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> toggleFlashlight() async {
     try {
       final res = await _method.invokeMethod<bool>('toggleFlashlight');
@@ -241,6 +277,15 @@ class LauncherPlatform {
       return res;
     } catch (_) {
       return null;
+    }
+  }
+
+  Future<bool> isNotificationAccessGranted() async {
+    try {
+      final res = await _method.invokeMethod<bool>('isNotificationAccessGranted');
+      return res ?? false;
+    } catch (_) {
+      return false;
     }
   }
 

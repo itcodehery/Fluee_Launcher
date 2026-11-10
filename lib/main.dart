@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -68,7 +67,10 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   DrawerMode _drawerMode = DrawerMode.grid;
   bool _autoFocusSearch = false;
   bool _searchIncludesHidden = false;
+  AppSortMode _sortMode = AppSortMode.az;
+  List<String> _recentAppIds = const [];
   bool _ambientIdleMode = true;
+  String? _ambientCustomText;
   bool _isIdle = false;
   Timer? _idleTimer;
   Timer? _mediaPollTimer;
@@ -78,9 +80,12 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   Color _customAccent = LauncherColors.defaultAccent;
   Color? _wallpaperAccent;
   bool _useWallpaperAccent = false;
-  String? _customWallpaperPath;
   bool _isPanelExpanded = false;
   bool _isQuickSettingsOpen = false;
+  double _qsDragOffset = 0.0;
+  double _dragStartY = 0;
+  double _dragStartOffset = 0;
+  bool _isDraggingQs = false;
   bool _hasCompletedIntro = true;
   bool _isInitialized = false;
 
@@ -144,14 +149,16 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
       _customAccent = prefs.customAccent;
       _hasCompletedIntro = prefs.hasCompletedIntro;
       _hiddenAppIds = prefs.hiddenAppIds;
-      _customWallpaperPath = prefs.customWallpaperPath;
       _selectedIconPack = pack;
       _customIconMap = customIcons;
       _drawerIsList = prefs.drawerIsList;
       _drawerMode = prefs.drawerMode;
+      _sortMode = prefs.sortMode;
+      _recentAppIds = prefs.recentAppIds;
       _autoFocusSearch = prefs.autoFocusSearch;
       _searchIncludesHidden = prefs.searchIncludesHidden;
       _ambientIdleMode = prefs.ambientIdleMode;
+      _ambientCustomText = prefs.ambientCustomText;
       _availableIconPacks = iconPacks;
       _allApps = apps;
       _dockIds = dockIds ?? const [];
@@ -228,6 +235,8 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     _hideStatusBar();
     Navigator.of(context).popUntil((route) => route.isFirst);
     setState(() {
+      _isDraggingQs = false;
+      _qsDragOffset = 0.0;
       _isPanelExpanded = false;
       _isQuickSettingsOpen = false;
       _isIdle = false;
@@ -402,14 +411,64 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     );
   }
 
+  void _launchApp(AppItem app) {
+    _platform.launch(app);
+    _prefs?.addRecentApp(app.id);
+    if (mounted) {
+      setState(() {
+        _recentAppIds = _prefs?.recentAppIds ?? _recentAppIds;
+      });
+    }
+  }
+
+  void _handleVerticalDragStart(DragStartDetails details) {
+    if (_isPanelExpanded || _isIdle) return;
+    _dragStartY = details.globalPosition.dy;
+    _dragStartOffset = _isQuickSettingsOpen ? 248.0 : 0.0;
+    _isDraggingQs = true;
+  }
+
+  void _handleVerticalDragUpdate(DragUpdateDetails details) {
+    if (!_isDraggingQs || _isPanelExpanded || _isIdle) return;
+    final dy = details.globalPosition.dy - _dragStartY;
+    setState(() {
+      _qsDragOffset = (_dragStartOffset + dy).clamp(0.0, 248.0);
+    });
+  }
+
+  void _handleVerticalDragEnd(DragEndDetails details) {
+    if (!_isDraggingQs) return;
+    _isDraggingQs = false;
+    if (_isPanelExpanded || _isIdle) return;
+
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity > 240) {
+      _showQuickSettings();
+    } else if (velocity < -240) {
+      _hideQuickSettings();
+    } else if (_qsDragOffset >= 100.0) {
+      _showQuickSettings();
+    } else {
+      _hideQuickSettings();
+    }
+  }
+
   void _showQuickSettings() {
     HapticFeedback.lightImpact();
-    setState(() => _isQuickSettingsOpen = true);
+    setState(() {
+      _isDraggingQs = false;
+      _qsDragOffset = 248.0;
+      _isQuickSettingsOpen = true;
+    });
   }
 
   void _hideQuickSettings() {
     HapticFeedback.lightImpact();
-    setState(() => _isQuickSettingsOpen = false);
+    setState(() {
+      _isDraggingQs = false;
+      _qsDragOffset = 0.0;
+      _isQuickSettingsOpen = false;
+    });
   }
 
   void _openCalendar() {
@@ -425,7 +484,6 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
           wallpaperAccent: _wallpaperAccent,
           allApps: _allApps,
           hiddenAppIds: _hiddenAppIds,
-          customWallpaperPath: _customWallpaperPath,
           availableIconPacks: _availableIconPacks,
           selectedIconPack: _selectedIconPack,
           drawerIsList: _drawerIsList,
@@ -433,6 +491,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
           autoFocusSearch: _autoFocusSearch,
           searchIncludesHidden: _searchIncludesHidden,
           ambientIdleMode: _ambientIdleMode,
+          ambientCustomText: _ambientCustomText,
           onSelectCustomAccent: (color) {
             if (!mounted) return;
             setState(() {
@@ -447,11 +506,6 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
             _prefs?.setUseWallpaperAccent();
           },
           onToggleHideApp: _toggleHideApp,
-          onSetCustomWallpaper: (path) async {
-            if (!mounted) return;
-            setState(() => _customWallpaperPath = path);
-            await _prefs?.setCustomWallpaperPath(path);
-          },
           onSelectIconPack: (pack) async {
             if (!mounted) return;
             setState(() => _selectedIconPack = pack);
@@ -490,8 +544,14 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
             await _prefs?.setAmbientIdleMode(val);
             _resetIdleTimer();
           },
+          onAmbientCustomTextChanged: (text) async {
+            if (!mounted) return;
+            setState(() => _ambientCustomText = text);
+            await _prefs?.setAmbientCustomText(text);
+          },
           onOpenHomeSettings: _platform.openHomeSettings,
           onOpenAccessibilitySettings: _platform.openAccessibilitySettings,
+          onOpenNotificationListenerSettings: _platform.openNotificationListenerSettings,
         ),
       ),
     );
@@ -541,7 +601,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
       canPop: false,
       onPopInvokedWithResult: (_, _) {
         if (_isQuickSettingsOpen) {
-          setState(() => _isQuickSettingsOpen = false);
+          _hideQuickSettings();
         } else if (_isPanelExpanded) {
           setState(() => _isPanelExpanded = false);
         }
@@ -562,10 +622,33 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                 ? maxH
                 : maxH * 0.5 + dragHandleHeight;
 
-            final panelBottom = _isQuickSettingsOpen ? -targetPanelHeight : 0.0;
-            final clockTop = _isQuickSettingsOpen
-                ? padding.top + 264.0
-                : padding.top + 16.0;
+            final dragRatio = (_qsDragOffset / 248.0).clamp(0.0, 1.0);
+
+            final double qsTop;
+            final double clockTop;
+            final double panelBottom;
+            final double qsOpacity;
+            final double glowOpacity;
+
+            if (_isDraggingQs) {
+              qsTop = -320.0 + (padding.top + 8.0 - (-320.0)) * dragRatio;
+              clockTop = (padding.top + 16.0) + 248.0 * dragRatio;
+              panelBottom = -targetPanelHeight * dragRatio;
+              qsOpacity = dragRatio;
+              glowOpacity = dragRatio;
+            } else {
+              qsTop = _isQuickSettingsOpen ? padding.top + 8.0 : -320.0;
+              clockTop = _isQuickSettingsOpen
+                  ? padding.top + 264.0
+                  : (_isIdle ? maxH * 0.28 : padding.top + 16.0);
+              panelBottom = (_isQuickSettingsOpen || _isIdle) ? -targetPanelHeight : 0.0;
+              qsOpacity = _isQuickSettingsOpen ? 1.0 : 0.0;
+              glowOpacity = _isQuickSettingsOpen ? 1.0 : 0.0;
+            }
+
+            final animDuration = _isDraggingQs
+                ? Duration.zero
+                : const Duration(milliseconds: 240);
 
             return Stack(
               children: [
@@ -578,74 +661,36 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                       HapticFeedback.mediumImpact();
                       _openSettingsPage();
                     },
-                    onVerticalDragEnd: (details) {
-                      if (details.primaryVelocity != null) {
-                        if (details.primaryVelocity! > 220 &&
-                            !_isPanelExpanded &&
-                            !_isQuickSettingsOpen) {
-                          _showQuickSettings();
-                        } else if (details.primaryVelocity! < -220 &&
-                            _isQuickSettingsOpen) {
-                          _hideQuickSettings();
-                        }
-                      }
-                    },
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 400),
-                      curve: Curves.easeOutCubic,
-                      opacity: _isIdle ? 0.0 : 1.0,
-                      child: _customWallpaperPath != null &&
-                              File(_customWallpaperPath!).existsSync()
-                          ? Image.file(
-                              File(_customWallpaperPath!),
-                              fit: BoxFit.cover,
-                            )
-                          : const ColoredBox(color: LauncherColors.background),
-                    ),
+                    onVerticalDragStart: _handleVerticalDragStart,
+                    onVerticalDragUpdate: _handleVerticalDragUpdate,
+                    onVerticalDragEnd: _handleVerticalDragEnd,
+                    child: const ColoredBox(color: LauncherColors.background),
                   ),
                 ),
-
-                // Solid black background underneath wallpaper when in idle mode
-                if (_isIdle)
-                  const Positioned.fill(
-                    child: IgnorePointer(
-                      child: ColoredBox(color: Colors.black),
-                    ),
-                  ),
-
-                // Dark overlay when wallpaper is active to keep icons readable
-                if (_customWallpaperPath != null)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: ColoredBox(
-                        color: Colors.black.withValues(alpha: 0.45),
-                      ),
-                    ),
-                  ),
 
                 // Subtle radial glow / gradient of the accent color when Quick Settings is open
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
-                  height: maxH * 0.55,
+                  height: maxH * 0.60,
                   child: IgnorePointer(
                     child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 320),
+                      duration: animDuration,
                       curve: Curves.easeOutCubic,
-                      opacity: _isQuickSettingsOpen ? 1.0 : 0.0,
+                      opacity: glowOpacity,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: RadialGradient(
-                            center: const Alignment(0.0, -0.6),
-                            radius: 1.05,
+                            center: const Alignment(0.0, -1.35),
+                            radius: 1.4,
                             colors: [
-                              _effectiveAccent.withValues(alpha: 0.16),
-                              _effectiveAccent.withValues(alpha: 0.07),
-                              _effectiveAccent.withValues(alpha: 0.015),
+                              _effectiveAccent.withValues(alpha: 0.18),
+                              _effectiveAccent.withValues(alpha: 0.08),
+                              _effectiveAccent.withValues(alpha: 0.02),
                               Colors.transparent,
                             ],
-                            stops: const [0.0, 0.40, 0.75, 1.0],
+                            stops: const [0.0, 0.35, 0.70, 1.0],
                           ),
                         ),
                       ),
@@ -655,14 +700,14 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
 
                 // Inline Quick Settings Watch Shade positioned above the clock
                 AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
+                  duration: animDuration,
                   curve: Curves.easeOutCubic,
-                  top: _isQuickSettingsOpen ? padding.top + 8.0 : -320.0,
+                  top: qsTop,
                   left: 0,
                   right: 0,
                   child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
-                    opacity: _isQuickSettingsOpen ? 1.0 : 0.0,
+                    duration: animDuration,
+                    opacity: qsOpacity,
                     child: Align(
                       alignment: Alignment.topCenter,
                       child: QuickSettingsPanel(
@@ -676,7 +721,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
 
                 // Clock area: Centered Pixel Watch clock with symmetrical circular complications
                 AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
+                  duration: animDuration,
                   curve: Curves.easeOutCubic,
                   top: clockTop,
                   left: 0,
@@ -684,18 +729,9 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                   child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
                     onDoubleTap: _handleDoubleTapToLock,
-                    onVerticalDragEnd: (details) {
-                      if (details.primaryVelocity != null) {
-                        if (details.primaryVelocity! > 220 &&
-                            !_isPanelExpanded &&
-                            !_isQuickSettingsOpen) {
-                          _showQuickSettings();
-                        } else if (details.primaryVelocity! < -220 &&
-                            _isQuickSettingsOpen) {
-                          _hideQuickSettings();
-                        }
-                      }
-                    },
+                    onVerticalDragStart: _handleVerticalDragStart,
+                    onVerticalDragUpdate: _handleVerticalDragUpdate,
+                    onVerticalDragEnd: _handleVerticalDragEnd,
                     child: AnimatedOpacity(
                       opacity: _isPanelExpanded ? 0.0 : 1.0,
                       duration: const Duration(milliseconds: 200),
@@ -709,9 +745,11 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                           isIdle: _isIdle,
                           mediaTitle: _mediaTitle,
                           mediaArtist: _mediaArtist,
+                          customAmbientText: _ambientCustomText,
                           onMediaTap: () => _platform.launch(
                             _allApps.firstWhere(
-                              (a) => a.packageName.contains('music') ||
+                              (a) =>
+                                  a.packageName.contains('music') ||
                                   a.packageName.contains('spotify') ||
                                   a.packageName.contains('audio'),
                               orElse: () => _allApps.first,
@@ -730,9 +768,9 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                   ),
                 ),
 
-                // Bottom half / expandable app grid panel (moves down out of sight when Quick Settings is open)
+                // Bottom half / expandable app grid panel (moves down out of sight when Quick Settings or Ambient Mode is open)
                 AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
+                  duration: animDuration,
                   curve: Curves.easeOutCubic,
                   left: 0,
                   right: 0,
@@ -746,49 +784,60 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                     isExpanded: _isPanelExpanded,
                     isListMode: _drawerIsList,
                     drawerMode: _drawerMode,
+                    onDrawerModeChanged: (mode) async {
+                      setState(() {
+                        _drawerMode = mode;
+                        _drawerIsList = mode == DrawerMode.list;
+                      });
+                      await _prefs?.setDrawerMode(mode);
+                    },
                     autoFocusSearch: _autoFocusSearch,
                     searchIncludesHidden: _searchIncludesHidden,
                     isIdle: _isIdle,
+                    recentAppIds: _recentAppIds,
+                    sortMode: _sortMode,
+                    onSortModeChanged: (mode) async {
+                      setState(() => _sortMode = mode);
+                      await _prefs?.setSortMode(mode);
+                    },
                     accent: _effectiveAccent,
                     onExpandedChanged: (expanded) {
                       if (_isQuickSettingsOpen) {
-                        setState(() => _isQuickSettingsOpen = false);
+                        _hideQuickSettings();
                       }
                       setState(() => _isPanelExpanded = expanded);
                     },
-                    onAppTap: _platform.launch,
+                    onAppTap: _launchApp,
                     onAppLongPress: _showAppActions,
                   ),
                 ),
 
-                // Persistent 4-slot dock at bottom (animates down / hides in idle mode)
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 320),
-                  curve: Curves.easeOutCubic,
+                // Persistent 4-slot dock at bottom (remains visible in ambient mode with transparent backgrounds)
+                Positioned(
                   left: 0,
                   right: 0,
-                  bottom: _isIdle ? -dockHeight - 16 : padding.bottom,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeOutCubic,
-                    opacity: _isIdle ? 0.0 : 1.0,
-                    child: Dock(
-                      apps: _dockApps,
-                      accent: _effectiveAccent,
-                      metrics: metrics,
-                      onAppTap: _platform.launch,
-                      onAppLongPress: _showAppActions,
-                      onReorder: _reorderDock,
-                    ),
+                  bottom: padding.bottom,
+                  child: Dock(
+                    apps: _dockApps,
+                    accent: _effectiveAccent,
+                    metrics: metrics,
+                    transparentBackground: _isIdle,
+                    onAppTap: _launchApp,
+                    onAppLongPress: _showAppActions,
+                    onReorder: _reorderDock,
                   ),
                 ),
 
-                // Dim scrim overlay when in ambient idle mode
-                Positioned.fill(
+                // Dim scrim overlay when in ambient idle mode (dock sits on top with its own opacity for clarity)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: padding.bottom + metrics.tileSize + 8,
                   child: IgnorePointer(
                     child: AnimatedOpacity(
                       duration: const Duration(milliseconds: 400),
-                      curve: Curves.easeOutCubic,
+                      curve: Curves.easeInOutCubic,
                       opacity: _isIdle ? 0.38 : 0.0,
                       child: const ColoredBox(color: Colors.black),
                     ),

@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import '../models/app_item.dart';
 import '../services/launcher_platform.dart';
 import '../services/launcher_preferences.dart';
@@ -17,7 +15,7 @@ class SettingsPage extends StatefulWidget {
     required this.wallpaperAccent,
     required this.allApps,
     required this.hiddenAppIds,
-    required this.customWallpaperPath,
+    this.customWallpaperPath,
     required this.availableIconPacks,
     required this.selectedIconPack,
     required this.drawerIsList,
@@ -25,18 +23,21 @@ class SettingsPage extends StatefulWidget {
     required this.autoFocusSearch,
     this.searchIncludesHidden = false,
     this.ambientIdleMode = true,
+    this.ambientCustomText,
     required this.onSelectCustomAccent,
     required this.onSelectWallpaperAccent,
     required this.onToggleHideApp,
-    required this.onSetCustomWallpaper,
+    this.onSetCustomWallpaper,
     required this.onSelectIconPack,
     required this.onToggleDrawerIsList,
     this.onSelectDrawerMode,
     required this.onToggleAutoFocusSearch,
     this.onToggleSearchIncludesHidden,
     this.onToggleAmbientIdleMode,
+    this.onAmbientCustomTextChanged,
     required this.onOpenHomeSettings,
     required this.onOpenAccessibilitySettings,
+    this.onOpenNotificationListenerSettings,
   });
 
   final Color accent;
@@ -52,25 +53,27 @@ class SettingsPage extends StatefulWidget {
   final bool autoFocusSearch;
   final bool searchIncludesHidden;
   final bool ambientIdleMode;
+  final String? ambientCustomText;
   final ValueChanged<Color> onSelectCustomAccent;
   final VoidCallback onSelectWallpaperAccent;
   final ValueChanged<AppItem> onToggleHideApp;
-  final ValueChanged<String?> onSetCustomWallpaper;
+  final ValueChanged<String?>? onSetCustomWallpaper;
   final ValueChanged<String?> onSelectIconPack;
   final ValueChanged<bool> onToggleDrawerIsList;
   final ValueChanged<DrawerMode>? onSelectDrawerMode;
   final ValueChanged<bool> onToggleAutoFocusSearch;
   final ValueChanged<bool>? onToggleSearchIncludesHidden;
   final ValueChanged<bool>? onToggleAmbientIdleMode;
+  final ValueChanged<String?>? onAmbientCustomTextChanged;
   final VoidCallback onOpenHomeSettings;
   final VoidCallback onOpenAccessibilitySettings;
+  final VoidCallback? onOpenNotificationListenerSettings;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  final ImagePicker _picker = ImagePicker();
   String _searchQuery = '';
   late Color _currentAccent;
   late bool _useWallpaper;
@@ -78,6 +81,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late bool _autoFocus;
   late bool _searchIncludesHidden;
   late bool _ambientIdle;
+  late final TextEditingController _ambientTextController;
   bool _showCustomSliders = false;
 
   @override
@@ -90,6 +94,13 @@ class _SettingsPageState extends State<SettingsPage> {
     _autoFocus = widget.autoFocusSearch;
     _searchIncludesHidden = widget.searchIncludesHidden;
     _ambientIdle = widget.ambientIdleMode;
+    _ambientTextController = TextEditingController(text: widget.ambientCustomText ?? '');
+  }
+
+  @override
+  void dispose() {
+    _ambientTextController.dispose();
+    super.dispose();
   }
 
   @override
@@ -114,13 +125,6 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     if (oldWidget.ambientIdleMode != widget.ambientIdleMode) {
       _ambientIdle = widget.ambientIdleMode;
-    }
-  }
-
-  Future<void> _pickWallpaper() async {
-    final image = await _picker.pickImage(source: ImageSource.gallery);
-    if (image != null && mounted) {
-      widget.onSetCustomWallpaper(image.path);
     }
   }
 
@@ -218,7 +222,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               ),
                               SizedBox(height: 2),
                               Text(
-                                'Choose grid, tiles, or list presentation',
+                                'Choose grid or list presentation',
                                 style: TextStyle(
                                   color: LauncherColors.textSecondary,
                                   fontSize: 12,
@@ -236,12 +240,6 @@ class _SettingsPageState extends State<SettingsPage> {
                           mode: DrawerMode.grid,
                           label: 'Grid (4x)',
                           icon: Icons.grid_view_rounded,
-                        ),
-                        const SizedBox(width: 8),
-                        _buildModeButton(
-                          mode: DrawerMode.tiles,
-                          label: 'Android 12 Tiles',
-                          icon: Icons.view_quilt_rounded,
                         ),
                         const SizedBox(width: 8),
                         _buildModeButton(
@@ -444,102 +442,6 @@ class _SettingsPageState extends State<SettingsPage> {
                       const Text(
                         'Install icon packs from Google Play Store to apply custom themes globally or to individual apps.',
                         style: TextStyle(color: Colors.white38, fontSize: 12),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Wallpaper Section
-              const Text(
-                'WALLPAPER',
-                style: TextStyle(
-                  color: LauncherColors.textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.1,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: LauncherColors.tileBackground,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: Colors.black38,
-                        borderRadius: BorderRadius.circular(12),
-                        image: widget.customWallpaperPath != null
-                            ? DecorationImage(
-                                image: FileImage(File(widget.customWallpaperPath!)),
-                                fit: BoxFit.cover,
-                              )
-                            : null,
-                      ),
-                      child: widget.customWallpaperPath == null
-                          ? const Icon(Icons.wallpaper, color: Colors.white54, size: 26)
-                          : null,
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.customWallpaperPath != null
-                                ? 'Custom wallpaper set'
-                                : 'Default black wallpaper',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          const Text(
-                            'Pick from gallery or reset',
-                            style: TextStyle(
-                              color: LauncherColors.textSecondary,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    M3SpringButton(
-                      onTap: _pickWallpaper,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: _currentAccent,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          'Choose',
-                          style: TextStyle(
-                            color: LauncherColors.readableOn(_currentAccent),
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (widget.customWallpaperPath != null) ...[
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: LauncherColors.danger),
-                        onPressed: () {
-                          widget.onSetCustomWallpaper(null);
-                          setState(() {});
-                        },
                       ),
                     ],
                   ],
@@ -790,30 +692,102 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: LauncherColors.tileBackground,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: SwitchListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  secondary: Icon(Icons.nightlight_round, color: _currentAccent, size: 22),
-                  title: const Text(
-                    'Ambient Idle Screen',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      secondary: Icon(Icons.nightlight_round, color: _currentAccent, size: 22),
+                      title: const Text(
+                        'Ambient Idle Screen',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: const Text(
+                        'Dim screen, hide app drawer, expand clock after 8s of inactivity',
+                        style: TextStyle(
+                          color: LauncherColors.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                      value: _ambientIdle,
+                      activeThumbColor: _currentAccent,
+                      onChanged: (val) {
+                        setState(() => _ambientIdle = val);
+                        widget.onToggleAmbientIdleMode?.call(val);
+                      },
                     ),
+                    if (_ambientIdle) ...[
+                      const Divider(color: Color(0x22FFFFFF), height: 1),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                        child: TextField(
+                          controller: _ambientTextController,
+                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          onChanged: (text) {
+                            widget.onAmbientCustomTextChanged?.call(text);
+                          },
+                          decoration: InputDecoration(
+                            labelText: 'Custom Ambient Text',
+                            labelStyle: TextStyle(color: _currentAccent, fontSize: 12),
+                            hintText: 'e.g. Focus on what matters, breathe...',
+                            hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                            isDense: true,
+                            filled: true,
+                            fillColor: const Color(0xFF222222),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Now Playing / Media Notification Access Setup
+              M3SpringButton(
+                onTap: widget.onOpenNotificationListenerSettings ?? () {},
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: LauncherColors.tileBackground,
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  subtitle: const Text(
-                    'Dim screen, hide dock, expand clock after 8s of inactivity',
-                    style: TextStyle(
-                      color: LauncherColors.textSecondary,
-                      fontSize: 12,
-                    ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.music_note_rounded, color: _currentAccent, size: 22),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Now Playing Setup',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              'Enable Notification Access to detect music',
+                              style: TextStyle(
+                                  color: LauncherColors.textSecondary, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios_rounded,
+                          color: Colors.white38, size: 14),
+                    ],
                   ),
-                  value: _ambientIdle,
-                  activeThumbColor: _currentAccent,
-                  onChanged: (val) {
-                    setState(() => _ambientIdle = val);
-                    widget.onToggleAmbientIdleMode?.call(val);
-                  },
                 ),
               ),
 

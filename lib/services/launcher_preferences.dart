@@ -6,7 +6,12 @@ import '../theme/launcher_colors.dart';
 enum DrawerMode {
   grid,
   list,
-  tiles,
+}
+
+enum AppSortMode {
+  az,
+  za,
+  recent,
 }
 
 class LauncherPreferences {
@@ -15,6 +20,8 @@ class LauncherPreferences {
   final SharedPreferences _prefs;
 
   static const _keyDock = 'dock_ids';
+  static const _keyRecentApps = 'recent_app_ids';
+  static const _keySortMode = 'drawer_sort_mode';
   static const _keyWallpaperAccent = 'accent_wallpaper';
   static const _keyAccentColor = 'accent_color';
   static const _keyCompletedIntro = 'completed_intro';
@@ -27,6 +34,7 @@ class LauncherPreferences {
   static const _keyAutoFocusSearch = 'auto_focus_search';
   static const _keySearchIncludesHidden = 'search_includes_hidden';
   static const _keyAmbientIdleMode = 'ambient_idle_mode';
+  static const _keyAmbientCustomText = 'ambient_custom_text';
 
   static Future<LauncherPreferences> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -42,6 +50,30 @@ class LauncherPreferences {
 
   Future<void> setDockIds(List<String> ids) =>
       _prefs.setStringList(_keyDock, ids);
+
+  List<String> get recentAppIds =>
+      _prefs.getStringList(_keyRecentApps) ?? const [];
+
+  Future<void> addRecentApp(String appId) async {
+    final list = recentAppIds.toSet().toList();
+    list.remove(appId);
+    list.insert(0, appId);
+    if (list.length > 30) {
+      list.removeRange(30, list.length);
+    }
+    await _prefs.setStringList(_keyRecentApps, list);
+  }
+
+  AppSortMode get sortMode {
+    final name = _prefs.getString(_keySortMode);
+    return AppSortMode.values.firstWhere(
+      (m) => m.name == name,
+      orElse: () => AppSortMode.az,
+    );
+  }
+
+  Future<void> setSortMode(AppSortMode mode) =>
+      _prefs.setString(_keySortMode, mode.name);
 
   Set<String> get hiddenAppIds =>
       (_prefs.getStringList(_keyHiddenApps) ?? const []).toSet();
@@ -129,6 +161,16 @@ class LauncherPreferences {
 
   Future<void> setAmbientIdleMode(bool value) =>
       _prefs.setBool(_keyAmbientIdleMode, value);
+
+  String? get ambientCustomText => _prefs.getString(_keyAmbientCustomText);
+
+  Future<void> setAmbientCustomText(String? value) async {
+    if (value == null || value.trim().isEmpty) {
+      await _prefs.remove(_keyAmbientCustomText);
+    } else {
+      await _prefs.setString(_keyAmbientCustomText, value.trim());
+    }
+  }
 
   bool get useWallpaperAccent =>
       _prefs.getBool(_keyWallpaperAccent) ?? false;

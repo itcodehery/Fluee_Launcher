@@ -15,6 +15,7 @@ class Dock extends StatelessWidget {
     required this.onAppTap,
     required this.onAppLongPress,
     required this.onReorder,
+    this.transparentBackground = false,
   });
 
   final List<AppItem> apps;
@@ -23,6 +24,7 @@ class Dock extends StatelessWidget {
   final ValueChanged<AppItem> onAppTap;
   final ValueChanged<AppItem> onAppLongPress;
   final void Function(int oldIndex, int newIndex) onReorder;
+  final bool transparentBackground;
 
   @override
   Widget build(BuildContext context) {
@@ -121,6 +123,7 @@ class Dock extends StatelessWidget {
                                 background: accent,
                                 iconTint: iconTint,
                                 borderRadius: metrics.borderRadius,
+                                transparentBackground: transparentBackground,
                                 onTap: () => onAppTap(app),
                                 onLongPress: () {}, // Long-press in dock is reserved for drag reordering
                               ),

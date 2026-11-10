@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/app_item.dart';
 import '../services/launcher_preferences.dart';
 import '../theme/launcher_colors.dart';
@@ -44,6 +45,9 @@ class AppPanel extends StatefulWidget {
     this.autoFocusSearch = false,
     this.searchIncludesHidden = false,
     this.isIdle = false,
+    this.recentAppIds = const [],
+    this.sortMode = AppSortMode.az,
+    this.onSortModeChanged,
     required this.accent,
     required this.onExpandedChanged,
     required this.onAppTap,
@@ -61,6 +65,9 @@ class AppPanel extends StatefulWidget {
   final bool autoFocusSearch;
   final bool searchIncludesHidden;
   final bool isIdle;
+  final List<String> recentAppIds;
+  final AppSortMode sortMode;
+  final ValueChanged<AppSortMode>? onSortModeChanged;
   final Color accent;
   final ValueChanged<bool> onExpandedChanged;
   final ValueChanged<AppItem> onAppTap;
@@ -120,20 +127,72 @@ class _AppPanelState extends State<AppPanel> {
     super.dispose();
   }
 
-  List<AppItem> get _filteredApps {
+  List<AppItem> get _sortedAndFilteredApps {
     final pool =
         (widget.searchIncludesHidden &&
             _query.isNotEmpty &&
             widget.allApps.isNotEmpty)
         ? widget.allApps
         : widget.apps;
-    if (_query.isEmpty) return pool;
-    return pool
-        .where(
-          (a) =>
-              a.label.toLowerCase().contains(_query) ||
-              a.packageName.toLowerCase().contains(_query),
-        )
+
+    List<AppItem> result;
+    if (_query.isEmpty) {
+      if (widget.sortMode == AppSortMode.recent) {
+        result = List<AppItem>.from(pool);
+      } else {
+        // Pin recently used apps right at the start of the drawer when not searching
+        final recentApps = _recentApps;
+        final recentSet = recentApps.map((a) => a.id).toSet();
+        final remaining = pool.where((a) => !recentSet.contains(a.id)).toList();
+
+        if (widget.sortMode == AppSortMode.az) {
+          remaining.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+        } else if (widget.sortMode == AppSortMode.za) {
+          remaining.sort((a, b) => b.label.toLowerCase().compareTo(a.label.toLowerCase()));
+        }
+        result = [...recentApps, ...remaining];
+        return result;
+      }
+    } else {
+      result = pool
+          .where(
+            (a) =>
+                a.label.toLowerCase().contains(_query) ||
+                a.packageName.toLowerCase().contains(_query),
+          )
+          .toList();
+    }
+
+    switch (widget.sortMode) {
+      case AppSortMode.az:
+        result.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+        break;
+      case AppSortMode.za:
+        result.sort((a, b) => b.label.toLowerCase().compareTo(a.label.toLowerCase()));
+        break;
+      case AppSortMode.recent:
+        final recentOrder = {
+          for (var i = 0; i < widget.recentAppIds.length; i++)
+            widget.recentAppIds[i]: i
+        };
+        result.sort((a, b) {
+          final posA = recentOrder[a.id] ?? 999999;
+          final posB = recentOrder[b.id] ?? 999999;
+          if (posA != posB) return posA.compareTo(posB);
+          return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+        });
+        break;
+    }
+    return result;
+  }
+
+  List<AppItem> get _recentApps {
+    if (widget.recentAppIds.isEmpty) return const [];
+    final byId = {for (final a in widget.allApps.isNotEmpty ? widget.allApps : widget.apps) a.id: a};
+    return widget.recentAppIds
+        .map((id) => byId[id])
+        .whereType<AppItem>()
+        .take(8)
         .toList();
   }
 
@@ -243,119 +302,6 @@ class _AppPanelState extends State<AppPanel> {
           },
         );
 
-      case DrawerMode.tiles:
-        // Android 12 Quick Settings style 2-column wide rounded pill tiles
-        return GridView.builder(
-          controller: _scrollController,
-          padding: EdgeInsets.only(
-            left: TileMetrics.margin + 4,
-            right: TileMetrics.margin + 4,
-            top: 4,
-            bottom: listBottomPadding,
-          ),
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
-          ),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 2.65,
-          ),
-          itemCount: displayApps.length,
-          itemBuilder: (context, index) {
-            final app = displayApps[index];
-            return M3SpringButton(
-              key: ValueKey('${app.id}_$index'),
-              onTap: () => widget.onAppTap(app),
-              onLongPress: () => widget.onAppLongPress(app),
-              pressedScale: 0.95,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: LauncherColors.tileBackground,
-                  borderRadius: BorderRadius.circular(22),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 38,
-                      height: 38,
-                      child: DecoratedBox(
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF2C2C2C),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: FractionallySizedBox(
-                            widthFactor: 0.62,
-                            heightFactor: 0.62,
-                            child: app.icon.isNotEmpty
-                                ? (app.isMonochrome
-                                      ? Image.memory(
-                                          app.icon,
-                                          fit: BoxFit.contain,
-                                          gaplessPlayback: true,
-                                          errorBuilder:
-                                              (context, error, stackTrace) =>
-                                                  const Icon(
-                                                    Icons.apps,
-                                                    color:
-                                                        LauncherColors.tileIcon,
-                                                    size: 18,
-                                                  ),
-                                          color: LauncherColors.tileIcon,
-                                          colorBlendMode: BlendMode.srcIn,
-                                        )
-                                      : ColorFiltered(
-                                          colorFilter: _desaturatedFilter,
-                                          child: Image.memory(
-                                            app.icon,
-                                            fit: BoxFit.contain,
-                                            gaplessPlayback: true,
-                                            errorBuilder:
-                                                (context, error, stackTrace) =>
-                                                    const Icon(
-                                                      Icons.apps,
-                                                      color: LauncherColors
-                                                          .tileIcon,
-                                                      size: 18,
-                                                    ),
-                                          ),
-                                        ))
-                                : const Icon(
-                                    Icons.apps,
-                                    color: LauncherColors.tileIcon,
-                                    size: 18,
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        app.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-
       case DrawerMode.grid:
         return GridView.builder(
           controller: _scrollController,
@@ -395,9 +341,9 @@ class _AppPanelState extends State<AppPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final displayApps = _filteredApps;
+    final displayApps = _sortedAndFilteredApps;
     final listBottomPadding = widget.isExpanded
-        ? 12.0
+        ? (widget.dockHeight + 48 + 24)
         : (widget.dockHeight + TileMetrics.gap);
 
     return Column(
@@ -490,15 +436,11 @@ class _AppPanelState extends State<AppPanel> {
                   }
                   final dockTop = (h - widget.dockHeight).clamp(0.0, h);
                   final fadeStart =
-                      ((dockTop - widget.metrics.tileSize * 0.5) / h).clamp(
+                      ((dockTop - widget.metrics.tileSize * 0.6) / h).clamp(
                         0.0,
                         1.0,
                       );
-                  final fadeEnd =
-                      ((dockTop + widget.metrics.tileSize * 0.35) / h).clamp(
-                        fadeStart,
-                        1.0,
-                      );
+                  final fadeEnd = (dockTop / h).clamp(fadeStart, 1.0);
 
                   return LinearGradient(
                     begin: Alignment.topCenter,
@@ -507,8 +449,8 @@ class _AppPanelState extends State<AppPanel> {
                     colors: const [
                       Colors.black,
                       Colors.black,
-                      Color(0x40000000),
-                      Color(0x40000000),
+                      Colors.transparent,
+                      Colors.transparent,
                     ],
                   ).createShader(rect);
                 },
@@ -518,7 +460,7 @@ class _AppPanelState extends State<AppPanel> {
           ),
         ),
 
-        // Animated Search Bar positioned neatly ABOVE the persistent dock
+        // Floating Search Bar positioned neatly ABOVE the persistent dock (no bottom container)
         AnimatedSize(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
@@ -533,8 +475,15 @@ class _AppPanelState extends State<AppPanel> {
                   child: Container(
                     height: 48,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF222222),
-                      borderRadius: BorderRadius.circular(48),
+                      color: const Color(0xFF1E1E1E),
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.40),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(
@@ -579,12 +528,119 @@ class _AppPanelState extends State<AppPanel> {
                               _searchController.clear();
                               setState(() => _query = '');
                             },
-                            child: const Icon(
-                              Icons.close_rounded,
-                              color: Colors.white54,
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 4),
+                              child: Icon(
+                                Icons.close_rounded,
+                                color: Colors.white54,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(width: 4),
+                        // Sort Mode Menu Button (A-Z, Z-A, Most Recently Used)
+                        PopupMenuButton<AppSortMode>(
+                          tooltip: 'Sort Apps',
+                          color: const Color(0xFF262626),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          initialValue: widget.sortMode,
+                          onSelected: (mode) {
+                            HapticFeedback.lightImpact();
+                            widget.onSortModeChanged?.call(mode);
+                          },
+                          icon: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2E2E2E),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              widget.sortMode == AppSortMode.recent
+                                  ? Icons.history_rounded
+                                  : (widget.sortMode == AppSortMode.za
+                                      ? Icons.sort_by_alpha_rounded
+                                      : Icons.sort_rounded),
+                              color: widget.accent,
                               size: 18,
                             ),
                           ),
+                          itemBuilder: (context) => [
+                            PopupMenuItem(
+                              value: AppSortMode.az,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.arrow_downward_rounded,
+                                    size: 18,
+                                    color: widget.sortMode == AppSortMode.az
+                                        ? widget.accent
+                                        : Colors.white70,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    'A to Z',
+                                    style: TextStyle(
+                                      color: widget.sortMode == AppSortMode.az
+                                          ? widget.accent
+                                          : Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: AppSortMode.za,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.arrow_upward_rounded,
+                                    size: 18,
+                                    color: widget.sortMode == AppSortMode.za
+                                        ? widget.accent
+                                        : Colors.white70,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    'Z to A',
+                                    style: TextStyle(
+                                      color: widget.sortMode == AppSortMode.za
+                                          ? widget.accent
+                                          : Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: AppSortMode.recent,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.history_rounded,
+                                    size: 18,
+                                    color: widget.sortMode == AppSortMode.recent
+                                        ? widget.accent
+                                        : Colors.white70,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    'Most Recently Used',
+                                    style: TextStyle(
+                                      color: widget.sortMode == AppSortMode.recent
+                                          ? widget.accent
+                                          : Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),

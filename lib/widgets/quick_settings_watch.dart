@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/launcher_platform.dart';
@@ -24,7 +25,7 @@ class QuickSettingsPanel extends StatefulWidget {
 }
 
 class _QuickSettingsPanelState extends State<QuickSettingsPanel>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _morphController;
 
   // Toggles for Quick Settings options
@@ -32,30 +33,55 @@ class _QuickSettingsPanelState extends State<QuickSettingsPanel>
   bool _isDndOn = false;
   bool _isAutoBrightnessOn = true;
   bool _isNightLightOn = false;
-  bool _isAirplaneOn = true; // Active in reference image
+  bool _isAirplaneOn = false;
   bool _isWifiOn = false;
-  bool _isAutoRotateOn = true; // Active in reference image
+  bool _isAutoRotateOn = true;
   bool _isBluetoothConnected = false;
+  Timer? _statusPollTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _morphController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 320),
     );
-    _checkBluetooth();
+    _syncAllStates();
+    _statusPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _syncAllStates();
+    });
   }
 
-  Future<void> _checkBluetooth() async {
-    final connected = await widget.platform.isBluetoothConnected();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _syncAllStates();
+    }
+  }
+
+  Future<void> _syncAllStates() async {
+    final bt = await widget.platform.isBluetoothConnected();
+    final airplane = await widget.platform.isAirplaneModeOn();
+    final wifi = await widget.platform.isWifiEnabled();
+    final rotate = await widget.platform.isAutoRotateOn();
+    final dnd = await widget.platform.isDndOn();
+
     if (mounted) {
-      setState(() => _isBluetoothConnected = connected);
+      setState(() {
+        _isBluetoothConnected = bt;
+        _isAirplaneOn = airplane;
+        _isWifiOn = wifi;
+        _isAutoRotateOn = rotate;
+        _isDndOn = dnd;
+      });
     }
   }
 
   @override
   void dispose() {
+    _statusPollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _morphController.dispose();
     super.dispose();
   }

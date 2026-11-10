@@ -41,6 +41,10 @@ class AppTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // When in ambient mode (transparent background on black screen), use pure white for monochrome icons
+    // so they remain clearly visible rather than blending into darkness.
+    final effectiveIconTint = transparentBackground ? Colors.white : iconTint;
+
     return M3SpringButton(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -64,35 +68,42 @@ class AppTile extends StatelessWidget {
                           app.icon,
                           fit: BoxFit.contain,
                           gaplessPlayback: true,
-                          color: iconTint,
+                          color: effectiveIconTint,
                           colorBlendMode: BlendMode.srcIn,
                           errorBuilder: (context, error, stackTrace) => Icon(
                             Icons.apps,
-                            color: iconTint,
+                            color: effectiveIconTint,
                             size: 28,
                           ),
                         )
                       : ColorFiltered(
-                          colorFilter: const ColorFilter.matrix(<double>[
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0,      0,      0,      1, 0,
-                          ]),
+                          colorFilter: transparentBackground
+                              ? const ColorFilter.matrix(<double>[
+                                  0.26, 0.75, 0.10, 0, 45,
+                                  0.26, 0.75, 0.10, 0, 45,
+                                  0.26, 0.75, 0.10, 0, 45,
+                                  0,    0,    0,    1, 0,
+                                ])
+                              : const ColorFilter.matrix(<double>[
+                                  0.2126, 0.7152, 0.0722, 0, 0,
+                                  0.2126, 0.7152, 0.0722, 0, 0,
+                                  0.2126, 0.7152, 0.0722, 0, 0,
+                                  0,      0,      0,      1, 0,
+                                ]),
                           child: Image.memory(
                             app.icon,
                             fit: BoxFit.contain,
                             gaplessPlayback: true,
                             errorBuilder: (context, error, stackTrace) => Icon(
                               Icons.apps,
-                              color: iconTint,
+                              color: effectiveIconTint,
                               size: 28,
                             ),
                           ),
                         ))
                   : Icon(
                       Icons.apps,
-                      color: iconTint,
+                      color: effectiveIconTint,
                       size: 28,
                     ),
             ),

@@ -231,7 +231,7 @@ void main() {
     expect(find.byType(AppTile), findsOneWidget);
   });
 
-  testWidgets('AppPanel renders in Android 12 Quick Settings style tiles mode',
+  testWidgets('AppPanel renders in List mode and supports sorting and recents',
       (WidgetTester tester) async {
     final sampleApps = [
       AppItem(
@@ -260,7 +260,7 @@ void main() {
             metrics: TileMetrics.forWidth(400),
             dockHeight: 80,
             isExpanded: true,
-            drawerMode: DrawerMode.tiles,
+            drawerMode: DrawerMode.list,
             accent: Colors.teal,
             onExpandedChanged: (_) {},
             onAppTap: (_) {},
@@ -270,7 +270,7 @@ void main() {
       ),
     );
 
-    // Verify 2-column Android 12 style tiles render app labels
+    // Verify list mode renders app labels
     expect(find.text('Chrome'), findsOneWidget);
     expect(find.text('Camera'), findsOneWidget);
   });

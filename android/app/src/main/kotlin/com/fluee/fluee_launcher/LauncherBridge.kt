@@ -200,6 +200,51 @@ class LauncherBridge(private val context: Context) :
                 result.success(null)
             }
 
+            "isAirplaneModeOn" -> {
+                try {
+                    val state = Settings.Global.getInt(
+                        context.contentResolver,
+                        Settings.Global.AIRPLANE_MODE_ON,
+                        0
+                    )
+                    result.success(state != 0)
+                } catch (_: Exception) {
+                    result.success(false)
+                }
+            }
+
+            "isWifiEnabled" -> {
+                try {
+                    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                    result.success(wifiManager?.isWifiEnabled ?: false)
+                } catch (_: Exception) {
+                    result.success(false)
+                }
+            }
+
+            "isAutoRotateOn" -> {
+                try {
+                    val state = Settings.System.getInt(
+                        context.contentResolver,
+                        Settings.System.ACCELEROMETER_ROTATION,
+                        0
+                    )
+                    result.success(state == 1)
+                } catch (_: Exception) {
+                    result.success(true)
+                }
+            }
+
+            "isDndOn" -> {
+                try {
+                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+                    val filter = nm?.currentInterruptionFilter
+                    result.success(filter != null && filter != android.app.NotificationManager.INTERRUPTION_FILTER_ALL)
+                } catch (_: Exception) {
+                    result.success(false)
+                }
+            }
+
             "isBluetoothConnected" -> {
                 try {
                     val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
@@ -207,10 +252,25 @@ class LauncherBridge(private val context: Context) :
                     if (adapter == null || !adapter.isEnabled) {
                         result.success(false)
                     } else {
-                        val a2dp = adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
-                        val headset = adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
-                        val gatt = adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.GATT) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
-                        result.success(a2dp || headset || gatt)
+                        val a2dp = try {
+                            adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
+                        } catch (_: SecurityException) { false }
+                        val headset = try {
+                            adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
+                        } catch (_: SecurityException) { false }
+                        val gatt = try {
+                            adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.GATT) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
+                        } catch (_: SecurityException) { false }
+                        val bondedConnected = try {
+                            // Check bonded devices for active connection methods
+                            adapter.bondedDevices?.any { dev ->
+                                try {
+                                    val isConnectedMethod = dev.javaClass.getMethod("isConnected")
+                                    isConnectedMethod.invoke(dev) as? Boolean ?: false
+                                } catch (_: Exception) { false }
+                            } ?: false
+                        } catch (_: SecurityException) { false }
+                        result.success(a2dp || headset || gatt || bondedConnected)
                     }
                 } catch (_: Exception) {
                     result.success(false)
@@ -238,6 +298,13 @@ class LauncherBridge(private val context: Context) :
             "lockScreen" -> {
                 val locked = LauncherAccessibilityService.lockScreen()
                 result.success(locked)
+            }
+
+            "isNotificationAccessGranted" -> {
+                val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+                val pkgName = context.packageName
+                val granted = flat != null && flat.contains(pkgName)
+                result.success(granted)
             }
 
             "getMediaTrack" -> {
@@ -275,6 +342,20 @@ class LauncherBridge(private val context: Context) :
                 } catch (_: SecurityException) {
                     // Notification Listener permission not granted yet
                 } catch (_: Exception) {}
+
+                // Fallback to active media notifications captured by listener service
+                val fallback = LauncherNotificationListener.latestMediaNotification
+                if (fallback != null && fallback.title.isNotEmpty()) {
+                    result.success(
+                        mapOf(
+                            "title" to fallback.title,
+                            "artist" to fallback.artist,
+                            "isPlaying" to fallback.isPlaying
+                        )
+                    )
+                    return
+                }
+
                 result.success(null)
             }
 
