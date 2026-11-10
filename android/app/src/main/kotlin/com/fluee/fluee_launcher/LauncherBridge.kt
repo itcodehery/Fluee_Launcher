@@ -10,6 +10,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
@@ -50,7 +51,7 @@ class LauncherBridge(private val context: Context) :
     // In-memory cache of parsed icon pack drawables: map of packageName -> Map(componentName -> drawableName)
     private val iconPackCache = ConcurrentHashMap<String, Map<String, String>>()
     // Memory cache for rendered app icon PNG bytes: key is "$pkg/$activityName#$serial@$iconPack"
-    private val renderedIconCache = ConcurrentHashMap<String, ByteArray>()
+    private val renderedIconCache = ConcurrentHashMap<String, Pair<ByteArray, Boolean>>()
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -239,6 +240,54 @@ class LauncherBridge(private val context: Context) :
                 result.success(locked)
             }
 
+            "getMediaTrack" -> {
+                try {
+                    val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
+                    if (mediaSessionManager != null) {
+                        val comp = ComponentName(context, LauncherNotificationListener::class.java)
+                        val controllers = mediaSessionManager.getActiveSessions(comp)
+                        val active = controllers.firstOrNull { ctrl ->
+                            val state = ctrl.playbackState?.state
+                            state == android.media.session.PlaybackState.STATE_PLAYING ||
+                            state == android.media.session.PlaybackState.STATE_BUFFERING
+                        } ?: controllers.firstOrNull()
+
+                        if (active != null) {
+                            val metadata = active.metadata
+                            val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+                                ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+                            val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+                                ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                                ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
+
+                            if (!title.isNullOrEmpty()) {
+                                result.success(
+                                    mapOf(
+                                        "title" to title,
+                                        "artist" to (artist ?: ""),
+                                        "isPlaying" to (active.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING)
+                                    )
+                                )
+                                return
+                            }
+                        }
+                    }
+                } catch (_: SecurityException) {
+                    // Notification Listener permission not granted yet
+                } catch (_: Exception) {}
+                result.success(null)
+            }
+
+            "openNotificationListenerSettings" -> {
+                try {
+                    context.startActivity(
+                        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (_: Exception) {}
+                result.success(null)
+            }
+
             "launch" -> {
                 val component = call.component()
                 val user = call.user()
@@ -275,6 +324,12 @@ class LauncherBridge(private val context: Context) :
 
             "openAlarms" -> {
                 startSafely(Intent(AlarmClock.ACTION_SHOW_ALARMS))
+                result.success(null)
+            }
+
+            "openCalendar" -> {
+                val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)
+                startSafely(intent)
                 result.success(null)
             }
 
@@ -388,7 +443,7 @@ class LauncherBridge(private val context: Context) :
     ): Pair<ByteArray, Boolean> {
         val cacheKey = "$id@$iconPackPackage@$customSpec"
         renderedIconCache[cacheKey]?.let {
-            return it to false
+            return it
         }
 
         // 1. Try Custom Spec ("pack/drawable")
@@ -399,9 +454,9 @@ class LauncherBridge(private val context: Context) :
                 val drawableName = parts[1]
                 val drawable = loadDrawableFromPack(packPkg, drawableName)
                 if (drawable != null) {
-                    val (bytes, mono) = renderIconGlyph(drawable)
-                    renderedIconCache[cacheKey] = bytes
-                    return bytes to mono
+                    val pair = renderIconGlyph(drawable)
+                    renderedIconCache[cacheKey] = pair
+                    return pair
                 }
             }
         }
@@ -413,9 +468,9 @@ class LauncherBridge(private val context: Context) :
             if (drawableName != null) {
                 val drawable = loadDrawableFromPack(iconPackPackage, drawableName)
                 if (drawable != null) {
-                    val (bytes, mono) = renderIconGlyph(drawable)
-                    renderedIconCache[cacheKey] = bytes
-                    return bytes to mono
+                    val pair = renderIconGlyph(drawable)
+                    renderedIconCache[cacheKey] = pair
+                    return pair
                 }
             }
         }
@@ -427,9 +482,9 @@ class LauncherBridge(private val context: Context) :
             null
         } ?: context.packageManager.defaultActivityIcon
 
-        val (bytes, mono) = renderIconGlyph(systemDrawable)
-        renderedIconCache[cacheKey] = bytes
-        return bytes to mono
+        val pair = renderIconGlyph(systemDrawable)
+        renderedIconCache[cacheKey] = pair
+        return pair
     }
 
     private fun renderSingleAppIcon(
@@ -467,21 +522,34 @@ class LauncherBridge(private val context: Context) :
         }
 
         if (adaptiveLayer != null) {
-            if (!monochrome) adaptiveLayer.colorFilter = greyscale
             adaptiveLayer.setBounds(-n / 4, -n / 4, n + n / 4, n + n / 4)
             adaptiveLayer.draw(canvas)
         } else {
             monochrome = false
             val legacy = drawable.mutate()
-            legacy.colorFilter = greyscale
             val inset = n / 8
             legacy.setBounds(inset, inset, n - inset, n - inset)
             legacy.draw(canvas)
         }
 
+        // If not already an official monochrome vector layer, apply desaturated monochrome filter to the bitmap
+        val finalBitmap: Bitmap
+        if (!monochrome) {
+            val desaturated = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
+            val desaturatedCanvas = Canvas(desaturated)
+            val paint = Paint().apply {
+                colorFilter = greyscale
+            }
+            desaturatedCanvas.drawBitmap(bitmap, 0f, 0f, paint)
+            bitmap.recycle()
+            finalBitmap = desaturated
+        } else {
+            finalBitmap = bitmap
+        }
+
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-        bitmap.recycle()
+        finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        finalBitmap.recycle()
         return out.toByteArray() to monochrome
     }
 

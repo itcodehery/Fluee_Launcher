@@ -235,6 +235,21 @@ class LauncherPlatform {
     }
   }
 
+  Future<Map<String, dynamic>?> getMediaTrack() async {
+    try {
+      final res = await _method.invokeMapMethod<String, dynamic>('getMediaTrack');
+      return res;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> openNotificationListenerSettings() async {
+    try {
+      await _method.invokeMethod('openNotificationListenerSettings');
+    } catch (_) {}
+  }
+
   Future<void> launch(AppItem app) async {
     try {
       await _method.invokeMethod('launch', {
@@ -266,6 +281,12 @@ class LauncherPlatform {
   Future<void> openAlarms() async {
     try {
       await _method.invokeMethod('openAlarms');
+    } catch (_) {}
+  }
+
+  Future<void> openCalendar() async {
+    try {
+      await _method.invokeMethod('openCalendar');
     } catch (_) {}
   }
 

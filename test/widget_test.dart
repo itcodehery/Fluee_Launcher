@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fluee_launcher/main.dart';
 import 'package:fluee_launcher/models/app_item.dart';
 import 'package:fluee_launcher/services/launcher_platform.dart';
+import 'package:fluee_launcher/services/launcher_preferences.dart';
 import 'package:fluee_launcher/widgets/app_panel.dart';
 import 'package:fluee_launcher/widgets/app_tile.dart';
 import 'package:fluee_launcher/widgets/launcher_clock.dart';
@@ -18,7 +19,7 @@ void main() {
   testWidgets('LauncherClock renders Pixel Watch stadium clock and weather complication',
       (WidgetTester tester) async {
     bool clockTapped = false;
-    bool settingsTapped = false;
+    bool dateTapped = false;
     bool weatherTapped = false;
 
     await tester.pumpWidget(
@@ -26,18 +27,21 @@ void main() {
         home: Scaffold(
           body: LauncherClock(
             accent: Colors.teal,
+            leadingValue: '12 Dec',
             onTap: () => clockTapped = true,
-            onSettingsTap: () => settingsTapped = true,
+            onDateTap: () => dateTapped = true,
+            onSettingsTap: () {},
             onWeatherTap: () => weatherTapped = true,
           ),
         ),
       ),
     );
 
-    // Verify leading settings icon
-    expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
-    await tester.tap(find.byIcon(Icons.tune_rounded));
-    expect(settingsTapped, true);
+    // Verify leading date complication (day and month stacked, e.g. "12" and "Dec")
+    expect(find.text('12'), findsOneWidget);
+    expect(find.text('Dec'), findsOneWidget);
+    await tester.tap(find.text('12'));
+    expect(dateTapped, true);
 
     // Verify trailing weather complication
     expect(find.byType(WeatherCircleComplication), findsOneWidget);
@@ -225,5 +229,49 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppTile), findsOneWidget);
+  });
+
+  testWidgets('AppPanel renders in Android 12 Quick Settings style tiles mode',
+      (WidgetTester tester) async {
+    final sampleApps = [
+      AppItem(
+        label: 'Chrome',
+        packageName: 'com.android.chrome',
+        activityName: 'com.google.android.apps.chrome.Main',
+        userSerial: 0,
+        icon: Uint8List(0),
+        isMonochrome: true,
+      ),
+      AppItem(
+        label: 'Camera',
+        packageName: 'com.android.camera',
+        activityName: 'com.android.camera.Camera',
+        userSerial: 0,
+        icon: Uint8List(0),
+        isMonochrome: true,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppPanel(
+            apps: sampleApps,
+            metrics: TileMetrics.forWidth(400),
+            dockHeight: 80,
+            isExpanded: true,
+            drawerMode: DrawerMode.tiles,
+            accent: Colors.teal,
+            onExpandedChanged: (_) {},
+            onAppTap: (_) {},
+            onAppLongPress: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    // Verify 2-column Android 12 style tiles render app labels
+    expect(find.text('Chrome'), findsOneWidget);
+    expect(find.text('Camera'), findsOneWidget);
   });
 }

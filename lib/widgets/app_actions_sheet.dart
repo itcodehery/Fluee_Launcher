@@ -53,20 +53,37 @@ class AppActionsSheet extends StatelessWidget {
                         widthFactor: TileMetrics.iconFraction,
                         heightFactor: TileMetrics.iconFraction,
                         child: app.icon.isNotEmpty
-                            ? Image.memory(
-                                app.icon,
-                                errorBuilder: (context, error, stackTrace) =>
-                                    const Icon(
-                                  Icons.apps,
-                                  color: LauncherColors.tileIcon,
-                                  size: 26,
-                                ),
-                                color: app.isMonochrome
-                                    ? LauncherColors.tileIcon
-                                    : null,
-                                colorBlendMode:
-                                    app.isMonochrome ? BlendMode.srcIn : null,
-                              )
+                            ? (app.isMonochrome
+                                ? Image.memory(
+                                    app.icon,
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            const Icon(
+                                      Icons.apps,
+                                      color: LauncherColors.tileIcon,
+                                      size: 26,
+                                    ),
+                                    color: LauncherColors.tileIcon,
+                                    colorBlendMode: BlendMode.srcIn,
+                                  )
+                                : ColorFiltered(
+                                    colorFilter: const ColorFilter.matrix(<double>[
+                                      0.2126, 0.7152, 0.0722, 0, 0,
+                                      0.2126, 0.7152, 0.0722, 0, 0,
+                                      0.2126, 0.7152, 0.0722, 0, 0,
+                                      0,      0,      0,      1, 0,
+                                    ]),
+                                    child: Image.memory(
+                                      app.icon,
+                                      errorBuilder:
+                                          (context, error, stackTrace) =>
+                                              const Icon(
+                                        Icons.apps,
+                                        color: LauncherColors.tileIcon,
+                                        size: 26,
+                                      ),
+                                    ),
+                                  ))
                             : const Icon(
                                 Icons.apps,
                                 color: LauncherColors.tileIcon,

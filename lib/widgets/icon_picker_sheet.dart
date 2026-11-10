@@ -192,7 +192,12 @@ class _IconPickerSheetState extends State<IconPickerSheet> {
                               ),
                               padding: const EdgeInsets.all(10),
                               child: item.icon.isNotEmpty
-                                  ? Image.memory(item.icon, fit: BoxFit.contain)
+                                  ? Image.memory(
+                                      item.icon,
+                                      fit: BoxFit.contain,
+                                      color: Colors.white,
+                                      colorBlendMode: BlendMode.srcIn,
+                                    )
                                   : const Icon(Icons.apps, color: Colors.white54),
                             ),
                           );

@@ -3,6 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/launcher_colors.dart';
 
+enum DrawerMode {
+  grid,
+  list,
+  tiles,
+}
+
 class LauncherPreferences {
   LauncherPreferences(this._prefs);
 
@@ -17,8 +23,10 @@ class LauncherPreferences {
   static const _keySelectedIconPack = 'selected_icon_pack';
   static const _keyCustomIconMap = 'custom_icon_map';
   static const _keyDrawerIsList = 'drawer_is_list';
+  static const _keyDrawerMode = 'drawer_display_mode';
   static const _keyAutoFocusSearch = 'auto_focus_search';
   static const _keySearchIncludesHidden = 'search_includes_hidden';
+  static const _keyAmbientIdleMode = 'ambient_idle_mode';
 
   static Future<LauncherPreferences> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -84,10 +92,27 @@ class LauncherPreferences {
     await _prefs.setString(_keyCustomIconMap, jsonEncode(current));
   }
 
-  bool get drawerIsList => _prefs.getBool(_keyDrawerIsList) ?? false;
+  bool get drawerIsList => drawerMode == DrawerMode.list;
 
   Future<void> setDrawerIsList(bool isList) =>
-      _prefs.setBool(_keyDrawerIsList, isList);
+      setDrawerMode(isList ? DrawerMode.list : DrawerMode.grid);
+
+  DrawerMode get drawerMode {
+    final modeStr = _prefs.getString(_keyDrawerMode);
+    if (modeStr != null) {
+      return DrawerMode.values.firstWhere(
+        (m) => m.name == modeStr,
+        orElse: () => DrawerMode.grid,
+      );
+    }
+    final legacyList = _prefs.getBool(_keyDrawerIsList) ?? false;
+    return legacyList ? DrawerMode.list : DrawerMode.grid;
+  }
+
+  Future<void> setDrawerMode(DrawerMode mode) async {
+    await _prefs.setString(_keyDrawerMode, mode.name);
+    await _prefs.setBool(_keyDrawerIsList, mode == DrawerMode.list);
+  }
 
   bool get autoFocusSearch => _prefs.getBool(_keyAutoFocusSearch) ?? false;
 
@@ -99,6 +124,11 @@ class LauncherPreferences {
 
   Future<void> setSearchIncludesHidden(bool value) =>
       _prefs.setBool(_keySearchIncludesHidden, value);
+
+  bool get ambientIdleMode => _prefs.getBool(_keyAmbientIdleMode) ?? true;
+
+  Future<void> setAmbientIdleMode(bool value) =>
+      _prefs.setBool(_keyAmbientIdleMode, value);
 
   bool get useWallpaperAccent =>
       _prefs.getBool(_keyWallpaperAccent) ?? false;

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/app_item.dart';
-import '../theme/launcher_colors.dart';
 import 'm3_spring_button.dart';
 
 /// Shared geometry for the 4-column app grid and 4-slot dock.
@@ -29,6 +28,7 @@ class AppTile extends StatelessWidget {
     required this.borderRadius,
     required this.onTap,
     required this.onLongPress,
+    this.transparentBackground = false,
   });
 
   final AppItem app;
@@ -37,6 +37,7 @@ class AppTile extends StatelessWidget {
   final BorderRadius borderRadius;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final bool transparentBackground;
 
   @override
   Widget build(BuildContext context) {
@@ -46,9 +47,11 @@ class AppTile extends StatelessWidget {
       pressedScale: 0.90,
       child: AspectRatio(
         aspectRatio: 1,
-        child: DecoratedBox(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
-            color: background,
+            color: transparentBackground ? Colors.transparent : background,
             borderRadius: borderRadius,
           ),
           child: Center(
@@ -56,26 +59,40 @@ class AppTile extends StatelessWidget {
               widthFactor: TileMetrics.iconFraction,
               heightFactor: TileMetrics.iconFraction,
               child: app.icon.isNotEmpty
-                  ? Image.memory(
-                      app.icon,
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true,
-                      errorBuilder: (context, error, stackTrace) => Icon(
-                        Icons.apps,
-                        color: app.isMonochrome
-                            ? iconTint
-                            : LauncherColors.tileIcon,
-                        size: 28,
-                      ),
-                      color: app.isMonochrome ? iconTint : null,
-                      colorBlendMode:
-                          app.isMonochrome ? BlendMode.srcIn : null,
-                    )
+                  ? (app.isMonochrome
+                      ? Image.memory(
+                          app.icon,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                          color: iconTint,
+                          colorBlendMode: BlendMode.srcIn,
+                          errorBuilder: (context, error, stackTrace) => Icon(
+                            Icons.apps,
+                            color: iconTint,
+                            size: 28,
+                          ),
+                        )
+                      : ColorFiltered(
+                          colorFilter: const ColorFilter.matrix(<double>[
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0,      0,      0,      1, 0,
+                          ]),
+                          child: Image.memory(
+                            app.icon,
+                            fit: BoxFit.contain,
+                            gaplessPlayback: true,
+                            errorBuilder: (context, error, stackTrace) => Icon(
+                              Icons.apps,
+                              color: iconTint,
+                              size: 28,
+                            ),
+                          ),
+                        ))
                   : Icon(
                       Icons.apps,
-                      color: app.isMonochrome
-                          ? iconTint
-                          : LauncherColors.tileIcon,
+                      color: iconTint,
                       size: 28,
                     ),
             ),

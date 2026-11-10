@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/app_item.dart';
 import '../services/launcher_platform.dart';
+import '../services/launcher_preferences.dart';
 import '../theme/launcher_colors.dart';
 import 'm3_spring_button.dart';
 
@@ -20,16 +21,20 @@ class SettingsPage extends StatefulWidget {
     required this.availableIconPacks,
     required this.selectedIconPack,
     required this.drawerIsList,
+    this.drawerMode,
     required this.autoFocusSearch,
     this.searchIncludesHidden = false,
+    this.ambientIdleMode = true,
     required this.onSelectCustomAccent,
     required this.onSelectWallpaperAccent,
     required this.onToggleHideApp,
     required this.onSetCustomWallpaper,
     required this.onSelectIconPack,
     required this.onToggleDrawerIsList,
+    this.onSelectDrawerMode,
     required this.onToggleAutoFocusSearch,
     this.onToggleSearchIncludesHidden,
+    this.onToggleAmbientIdleMode,
     required this.onOpenHomeSettings,
     required this.onOpenAccessibilitySettings,
   });
@@ -43,16 +48,20 @@ class SettingsPage extends StatefulWidget {
   final List<IconPackInfo> availableIconPacks;
   final String? selectedIconPack;
   final bool drawerIsList;
+  final DrawerMode? drawerMode;
   final bool autoFocusSearch;
   final bool searchIncludesHidden;
+  final bool ambientIdleMode;
   final ValueChanged<Color> onSelectCustomAccent;
   final VoidCallback onSelectWallpaperAccent;
   final ValueChanged<AppItem> onToggleHideApp;
   final ValueChanged<String?> onSetCustomWallpaper;
   final ValueChanged<String?> onSelectIconPack;
   final ValueChanged<bool> onToggleDrawerIsList;
+  final ValueChanged<DrawerMode>? onSelectDrawerMode;
   final ValueChanged<bool> onToggleAutoFocusSearch;
   final ValueChanged<bool>? onToggleSearchIncludesHidden;
+  final ValueChanged<bool>? onToggleAmbientIdleMode;
   final VoidCallback onOpenHomeSettings;
   final VoidCallback onOpenAccessibilitySettings;
 
@@ -65,9 +74,10 @@ class _SettingsPageState extends State<SettingsPage> {
   String _searchQuery = '';
   late Color _currentAccent;
   late bool _useWallpaper;
-  late bool _isList;
+  late DrawerMode _drawerMode;
   late bool _autoFocus;
   late bool _searchIncludesHidden;
+  late bool _ambientIdle;
   bool _showCustomSliders = false;
 
   @override
@@ -75,9 +85,11 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _currentAccent = widget.accent;
     _useWallpaper = widget.useWallpaperAccent;
-    _isList = widget.drawerIsList;
+    _drawerMode = widget.drawerMode ??
+        (widget.drawerIsList ? DrawerMode.list : DrawerMode.grid);
     _autoFocus = widget.autoFocusSearch;
     _searchIncludesHidden = widget.searchIncludesHidden;
+    _ambientIdle = widget.ambientIdleMode;
   }
 
   @override
@@ -89,14 +101,19 @@ class _SettingsPageState extends State<SettingsPage> {
     if (oldWidget.useWallpaperAccent != widget.useWallpaperAccent) {
       _useWallpaper = widget.useWallpaperAccent;
     }
-    if (oldWidget.drawerIsList != widget.drawerIsList) {
-      _isList = widget.drawerIsList;
+    if (oldWidget.drawerMode != widget.drawerMode && widget.drawerMode != null) {
+      _drawerMode = widget.drawerMode!;
+    } else if (oldWidget.drawerIsList != widget.drawerIsList) {
+      _drawerMode = widget.drawerIsList ? DrawerMode.list : DrawerMode.grid;
     }
     if (oldWidget.autoFocusSearch != widget.autoFocusSearch) {
       _autoFocus = widget.autoFocusSearch;
     }
     if (oldWidget.searchIncludesHidden != widget.searchIncludesHidden) {
       _searchIncludesHidden = widget.searchIncludesHidden;
+    }
+    if (oldWidget.ambientIdleMode != widget.ambientIdleMode) {
+      _ambientIdle = widget.ambientIdleMode;
     }
   }
 
@@ -176,46 +193,63 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: LauncherColors.tileBackground,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      _isList ? Icons.view_headline_rounded : Icons.grid_view_rounded,
-                      color: _currentAccent,
-                      size: 26,
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _isList ? 'List Mode' : 'Grid Mode',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.dashboard_customize_outlined,
+                          color: _currentAccent,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'App Drawer Layout',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Choose grid, tiles, or list presentation',
+                                style: TextStyle(
+                                  color: LauncherColors.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _isList
-                                ? 'Showing app icon with name'
-                                : 'Showing uniform 4-column tiles',
-                            style: const TextStyle(
-                              color: LauncherColors.textSecondary,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    Switch(
-                      value: _isList,
-                      activeThumbColor: _currentAccent,
-                      onChanged: (val) {
-                        setState(() => _isList = val);
-                        widget.onToggleDrawerIsList(val);
-                      },
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        _buildModeButton(
+                          mode: DrawerMode.grid,
+                          label: 'Grid (4x)',
+                          icon: Icons.grid_view_rounded,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildModeButton(
+                          mode: DrawerMode.tiles,
+                          label: 'Android 12 Tiles',
+                          icon: Icons.view_quilt_rounded,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildModeButton(
+                          mode: DrawerMode.list,
+                          label: 'List',
+                          icon: Icons.view_headline_rounded,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -715,6 +749,8 @@ class _SettingsPageState extends State<SettingsPage> {
                                   ? Image.memory(
                                       app.icon,
                                       fit: BoxFit.contain,
+                                      color: Colors.white,
+                                      colorBlendMode: BlendMode.srcIn,
                                       errorBuilder: (context, error, stackTrace) =>
                                           const Icon(Icons.apps, color: Colors.white54, size: 20),
                                     )
@@ -747,6 +783,41 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
 
               const SizedBox(height: 24),
+
+              // Ambient Idle Screen Setting
+              Container(
+                decoration: BoxDecoration(
+                  color: LauncherColors.tileBackground,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: SwitchListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  secondary: Icon(Icons.nightlight_round, color: _currentAccent, size: 22),
+                  title: const Text(
+                    'Ambient Idle Screen',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Dim screen, hide dock, expand clock after 8s of inactivity',
+                    style: TextStyle(
+                      color: LauncherColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                  value: _ambientIdle,
+                  activeThumbColor: _currentAccent,
+                  onChanged: (val) {
+                    setState(() => _ambientIdle = val);
+                    widget.onToggleAmbientIdleMode?.call(val);
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 12),
 
               // Double-Tap to Lock Screen Accessibility Setup
               M3SpringButton(
@@ -884,6 +955,58 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildModeButton({
+    required DrawerMode mode,
+    required String label,
+    required IconData icon,
+  }) {
+    final isSelected = _drawerMode == mode;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _drawerMode = mode;
+          });
+          widget.onSelectDrawerMode?.call(mode);
+          widget.onToggleDrawerIsList(mode == DrawerMode.list);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          decoration: BoxDecoration(
+            color: isSelected ? _currentAccent : const Color(0xFF242424),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                color: isSelected
+                    ? LauncherColors.readableOn(_currentAccent)
+                    : Colors.white70,
+                size: 20,
+              ),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: isSelected
+                      ? LauncherColors.readableOn(_currentAccent)
+                      : Colors.white70,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
