@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'marquee_text.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'm3_spring_button.dart';
 
@@ -20,6 +21,7 @@ class LauncherClock extends StatefulWidget {
     this.mediaArtist,
     this.onMediaTap,
     this.customAmbientText,
+    this.dashboard,
   });
 
   final Color accent;
@@ -35,6 +37,7 @@ class LauncherClock extends StatefulWidget {
   final String? mediaArtist;
   final VoidCallback? onMediaTap;
   final String? customAmbientText;
+  final Widget? dashboard;
 
   @override
   State<LauncherClock> createState() => _LauncherClockState();
@@ -43,6 +46,7 @@ class LauncherClock extends StatefulWidget {
 class _LauncherClockState extends State<LauncherClock> {
   DateTime _now = DateTime.now();
   Timer? _timer;
+  bool _expanded = false;
 
   @override
   void initState() {
@@ -64,10 +68,25 @@ class _LauncherClockState extends State<LauncherClock> {
   }
 
   @override
+  void didUpdateWidget(LauncherClock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isIdle && _expanded) _expanded = false;
+  }
+
+  void _onPillTap() {
+    if (widget.dashboard == null) {
+      widget.onTap();
+      return;
+    }
+    setState(() => _expanded = !_expanded);
+  }
+
+  @override
   void dispose() {
     _timer?.cancel();
     super.dispose();
   }
+
 
   String _formatTime(BuildContext context) {
     final use24h = MediaQuery.alwaysUse24HourFormatOf(context);
@@ -100,6 +119,47 @@ class _LauncherClockState extends State<LauncherClock> {
     return '$dayOfWeek, ${_now.day} $month';
   }
 
+  Widget _buildAmbientClockView() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          _formatTime(context),
+          style: GoogleFonts.plusJakartaSans(
+            color: widget.accent,
+            fontSize: 58,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.8,
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _ambientFullDate,
+          style: GoogleFonts.plusJakartaSans(
+            color: Colors.white.withValues(alpha: 0.90),
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.3,
+          ),
+        ),
+        if (widget.customAmbientText != null &&
+            widget.customAmbientText!.trim().isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            widget.customAmbientText!.trim(),
+            style: GoogleFonts.plusJakartaSans(
+              color: widget.accent.withValues(alpha: 0.90),
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              letterSpacing: -0.1,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Flat dark surface tone with zero borders
@@ -124,8 +184,15 @@ class _LauncherClockState extends State<LauncherClock> {
 
     final hasMedia = widget.mediaTitle != null && widget.mediaTitle!.isNotEmpty;
 
+    final hideSides = widget.isIdle || _expanded;
+    final slow = widget.isIdle;
+    final sizeDur = Duration(milliseconds: slow ? 1000 : 380);
+    final scaleDur = Duration(milliseconds: slow ? 800 : 240);
+    final fadeDur = Duration(milliseconds: slow ? 700 : 200);
+    final morphDur = Duration(milliseconds: slow ? 1000 : 380);
+
     return AnimatedSize(
-      duration: const Duration(milliseconds: 380),
+      duration: sizeDur,
       curve: Curves.easeInOutCubic,
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -138,13 +205,13 @@ class _LauncherClockState extends State<LauncherClock> {
             children: [
               // Leading Weather Circle Complication (32° with cloud icon & 270° arc gauge, exactly on left as in watch reference)
               AnimatedScale(
-                scale: widget.isIdle ? 0.0 : 1.0,
-                duration: const Duration(milliseconds: 240),
+                scale: hideSides ? 0.0 : 1.0,
+                duration: scaleDur,
                 curve: Curves.easeInOutCubic,
                 child: AnimatedOpacity(
-                  opacity: widget.isIdle ? 0.0 : 1.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: widget.isIdle
+                  opacity: hideSides ? 0.0 : 1.0,
+                  duration: fadeDur,
+                  child: hideSides
                       ? const SizedBox.shrink()
                       : Padding(
                           padding: const EdgeInsets.only(right: 12),
@@ -163,45 +230,75 @@ class _LauncherClockState extends State<LauncherClock> {
                 ),
               ),
 
-              // Center Pixel Watch Stadium Clock Pill (grows bigger in idle mode)
+              // Center clock pill; expands in place into the dashboard card
               M3SpringButton(
-                onTap: widget.onTap,
-                pressedScale: 0.94,
+                onTap: _onPillTap,
+                pressedScale: _expanded ? 0.99 : 0.94,
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 380),
-                  curve: Curves.easeInOutCubic,
+                  duration: _expanded
+                      ? const Duration(milliseconds: 480)
+                      : morphDur,
+                  curve: Curves.easeInOutCubicEmphasized,
                   padding: EdgeInsets.symmetric(
-                    horizontal: widget.isIdle ? 28 : 22,
-                    vertical: widget.isIdle ? 2 : 10,
+                    horizontal: _expanded ? 20 : (widget.isIdle ? 20 : 22),
+                    vertical: _expanded ? 14 : (widget.isIdle ? 0 : 10),
                   ),
                   decoration: BoxDecoration(
                     color: widget.isIdle ? Colors.transparent : pillSurface,
-                    borderRadius: BorderRadius.circular(widget.isIdle ? 24 : 30),
-                  ),
-                  child: AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 380),
-                    curve: Curves.easeInOutCubic,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: widget.accent,
-                      fontSize: widget.isIdle ? 58 : 34,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.8,
-                      height: 1.0,
+                    borderRadius: BorderRadius.circular(
+                      _expanded ? 36 : (widget.isIdle ? 24 : 30),
                     ),
-                    child: Text(_formatTime(context)),
+                  ),
+                  child: AnimatedSize(
+                    duration: const Duration(milliseconds: 480),
+                    curve: Curves.easeInOutCubicEmphasized,
+                    alignment: Alignment.topCenter,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!_expanded && widget.isIdle)
+                          _buildAmbientClockView()
+                        else
+                          AnimatedDefaultTextStyle(
+                            duration: morphDur,
+                            curve: Curves.easeInOutCubic,
+                            style: GoogleFonts.plusJakartaSans(
+                              color: widget.accent,
+                              fontSize: 34,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.8,
+                              height: 1.0,
+                            ),
+                            child: Text(_formatTime(context)),
+                          ),
+                        if (_expanded && widget.dashboard != null)
+                          TweenAnimationBuilder<double>(
+                            tween: Tween(begin: 0, end: 1),
+                            duration: const Duration(milliseconds: 420),
+                            curve: Curves.easeOut,
+                            builder: (context, t, child) =>
+                                Opacity(opacity: t, child: child),
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {},
+                              child: widget.dashboard!,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
 
               // Trailing Date Circle Complication (Day & Month stacked, exactly on right as in watch reference)
               AnimatedScale(
-                scale: widget.isIdle ? 0.0 : 1.0,
-                duration: const Duration(milliseconds: 240),
+                scale: hideSides ? 0.0 : 1.0,
+                duration: scaleDur,
                 curve: Curves.easeInOutCubic,
                 child: AnimatedOpacity(
-                  opacity: widget.isIdle ? 0.0 : 1.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: widget.isIdle
+                  opacity: hideSides ? 0.0 : 1.0,
+                  duration: fadeDur,
+                  child: hideSides
                       ? const SizedBox.shrink()
                       : Padding(
                           padding: const EdgeInsets.only(left: 12),
@@ -252,47 +349,6 @@ class _LauncherClockState extends State<LauncherClock> {
             ],
           ),
 
-          // Ambient state full date displayed directly below the expanded clock (e.g. "Wednesday, 12 Oct")
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 380),
-            firstCurve: Curves.easeInOutCubic,
-            secondCurve: Curves.easeInOutCubic,
-            crossFadeState: widget.isIdle
-                ? CrossFadeState.showFirst
-                : CrossFadeState.showSecond,
-            firstChild: Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _ambientFullDate,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: Colors.white.withValues(alpha: 0.90),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  if (widget.customAmbientText != null &&
-                      widget.customAmbientText!.trim().isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      widget.customAmbientText!.trim(),
-                      style: GoogleFonts.plusJakartaSans(
-                        color: widget.accent.withValues(alpha: 0.90),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: -0.1,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            secondChild: const SizedBox(height: 0, width: 0),
-          ),
-
           // Now Playing Pill below the clock
           if (hasMedia && !widget.isIdle) ...[
             const SizedBox(height: 10),
@@ -319,12 +375,11 @@ class _LauncherClockState extends State<LauncherClock> {
                       ),
                       const SizedBox(width: 8),
                       Flexible(
-                        child: Text(
-                          widget.mediaArtist != null && widget.mediaArtist!.isNotEmpty
+                        child: MarqueeText(
+                          text: widget.mediaArtist != null &&
+                                  widget.mediaArtist!.isNotEmpty
                               ? '${widget.mediaTitle} • ${widget.mediaArtist}'
                               : widget.mediaTitle!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.plusJakartaSans(
                             color: Colors.white,
                             fontSize: 12,

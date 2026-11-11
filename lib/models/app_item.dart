@@ -19,6 +19,24 @@ class AppItem {
 
   String get id => '$packageName/$activityName#$userSerial';
 
+  AppItem copyWith({
+    String? label,
+    String? packageName,
+    String? activityName,
+    int? userSerial,
+    Uint8List? icon,
+    bool? isMonochrome,
+  }) {
+    return AppItem(
+      label: label ?? this.label,
+      packageName: packageName ?? this.packageName,
+      activityName: activityName ?? this.activityName,
+      userSerial: userSerial ?? this.userSerial,
+      icon: icon ?? this.icon,
+      isMonochrome: isMonochrome ?? this.isMonochrome,
+    );
+  }
+
   factory AppItem.fromMap(Map<Object?, Object?> map) {
     return AppItem(
       label: (map['label'] as String?) ?? '',

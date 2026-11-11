@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
 import '../models/app_item.dart';
+import '../models/app_shortcut.dart';
 
 class IconPackInfo {
   const IconPackInfo({
@@ -142,72 +143,6 @@ class LauncherPlatform {
     }
   }
 
-  Future<void> openWifiSettings() async {
-    try {
-      await _method.invokeMethod('openWifiSettings');
-    } catch (_) {}
-  }
-
-  Future<void> openSoundSettings() async {
-    try {
-      await _method.invokeMethod('openSoundSettings');
-    } catch (_) {}
-  }
-
-  Future<void> openBatterySettings() async {
-    try {
-      await _method.invokeMethod('openBatterySettings');
-    } catch (_) {}
-  }
-
-  Future<void> openAirplaneSettings() async {
-    try {
-      await _method.invokeMethod('openAirplaneSettings');
-    } catch (_) {}
-  }
-
-  Future<void> openDisplaySettings() async {
-    try {
-      await _method.invokeMethod('openDisplaySettings');
-    } catch (_) {}
-  }
-
-  Future<void> openDndSettings() async {
-    try {
-      await _method.invokeMethod('openDndSettings');
-    } catch (_) {}
-  }
-
-  Future<void> openSystemSettings() async {
-    try {
-      await _method.invokeMethod('openSystemSettings');
-    } catch (_) {}
-  }
-
-  Future<void> openAutoRotateSettings() async {
-    try {
-      await _method.invokeMethod('openAutoRotateSettings');
-    } catch (_) {}
-  }
-
-  Future<void> openNightLightSettings() async {
-    try {
-      await _method.invokeMethod('openNightLightSettings');
-    } catch (_) {}
-  }
-
-  Future<void> openCamera() async {
-    try {
-      await _method.invokeMethod('openCamera');
-    } catch (_) {}
-  }
-
-  Future<void> openBluetoothSettings() async {
-    try {
-      await _method.invokeMethod('openBluetoothSettings');
-    } catch (_) {}
-  }
-
   Future<bool> isBluetoothConnected() async {
     try {
       final res = await _method.invokeMethod<bool>('isBluetoothConnected');
@@ -217,46 +152,61 @@ class LauncherPlatform {
     }
   }
 
-  Future<bool> isAirplaneModeOn() async {
+  Future<({int level, bool charging})?> getBattery() async {
     try {
-      final res = await _method.invokeMethod<bool>('isAirplaneModeOn');
-      return res ?? false;
+      final res = await _method.invokeMapMethod<String, dynamic>('getBatteryLevel');
+      if (res == null) return null;
+      return (
+        level: (res['level'] as num).toInt(),
+        charging: res['charging'] == true,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<double?> getVolume() async {
+    try {
+      return await _method.invokeMethod<double>('getVolume');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> setVolume(double value) async {
+    try {
+      await _method.invokeMethod('setVolume', {'value': value});
+    } catch (_) {}
+  }
+
+  Future<double?> getBrightness() async {
+    try {
+      return await _method.invokeMethod<double>('getBrightness');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Returns false when the "modify system settings" permission is missing.
+  Future<bool> setBrightness(double value) async {
+    try {
+      return await _method.invokeMethod<bool>('setBrightness', {'value': value}) ??
+          false;
     } catch (_) {
       return false;
     }
   }
 
-  Future<bool> isWifiEnabled() async {
+  Future<void> openWriteSettings() async {
     try {
-      final res = await _method.invokeMethod<bool>('isWifiEnabled');
-      return res ?? false;
-    } catch (_) {
-      return false;
-    }
+      await _method.invokeMethod('openWriteSettings');
+    } catch (_) {}
   }
 
-  Future<bool> isAutoRotateOn() async {
+  /// Opens the system power menu; false if the accessibility service is off.
+  Future<bool> showPowerMenu() async {
     try {
-      final res = await _method.invokeMethod<bool>('isAutoRotateOn');
-      return res ?? true;
-    } catch (_) {
-      return true;
-    }
-  }
-
-  Future<bool> isDndOn() async {
-    try {
-      final res = await _method.invokeMethod<bool>('isDndOn');
-      return res ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<bool> toggleFlashlight() async {
-    try {
-      final res = await _method.invokeMethod<bool>('toggleFlashlight');
-      return res ?? false;
+      return await _method.invokeMethod<bool>('showPowerMenu') ?? false;
     } catch (_) {
       return false;
     }
@@ -347,6 +297,68 @@ class LauncherPlatform {
       return argb != null ? Color(argb) : null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Queries Android dynamic and manifest shortcuts for a given package or all apps.
+  Future<List<AppShortcut>> getAppShortcuts([String? packageName]) async {
+    try {
+      final raw = await _method.invokeListMethod<Map<dynamic, dynamic>>(
+        'getShortcuts',
+        packageName != null ? {'packageName': packageName} : null,
+      );
+      if (raw == null) return const [];
+      return raw.map(AppShortcut.fromMap).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Starts a specific shortcut via Android LauncherApps API.
+  Future<bool> startShortcut(String packageName, String shortcutId) async {
+    try {
+      final ok = await _method.invokeMethod<bool>('startShortcut', {
+        'packageName': packageName,
+        'shortcutId': shortcutId,
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Exports backup JSON to local storage, SD Card, or cloud storage via system file picker.
+  Future<bool> exportBackupFile(String jsonContent, String fileName) async {
+    try {
+      final ok = await _method.invokeMethod<bool>('exportBackupFile', {
+        'content': jsonContent,
+        'fileName': fileName,
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Imports backup JSON from local storage, Google Drive, or cloud storage via system file picker.
+  Future<String?> importBackupFile() async {
+    try {
+      return await _method.invokeMethod<String>('importBackupFile');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Opens the system share sheet with the backup JSON text.
+  Future<bool> shareBackup(String jsonContent, [String? title]) async {
+    try {
+      final ok = await _method.invokeMethod<bool>('shareBackup', {
+        'content': jsonContent,
+        'title': title ?? 'Fluee Launcher Backup',
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
     }
   }
 }

@@ -52,7 +52,7 @@ class AppTile extends StatelessWidget {
       child: AspectRatio(
         aspectRatio: 1,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 320),
+          duration: Duration(milliseconds: transparentBackground ? 1000 : 320),
           curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             color: transparentBackground ? Colors.transparent : background,

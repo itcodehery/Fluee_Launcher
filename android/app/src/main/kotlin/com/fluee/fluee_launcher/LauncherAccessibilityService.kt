@@ -27,6 +27,11 @@ class LauncherAccessibilityService : AccessibilityService() {
     companion object {
         var instance: LauncherAccessibilityService? = null
 
+        fun showPowerMenu(): Boolean {
+            val service = instance ?: return false
+            return service.performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
+        }
+
         fun lockScreen(): Boolean {
             val service = instance ?: return false
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

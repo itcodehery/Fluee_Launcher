@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/app_item.dart';
+import '../models/app_shortcut.dart';
 import '../services/launcher_preferences.dart';
 import '../theme/launcher_colors.dart';
 import 'app_tile.dart';
@@ -49,6 +50,8 @@ class AppPanel extends StatefulWidget {
     this.sortMode = AppSortMode.az,
     this.onSortModeChanged,
     required this.accent,
+    this.shortcuts = const [],
+    this.onShortcutTap,
     required this.onExpandedChanged,
     required this.onAppTap,
     required this.onAppLongPress,
@@ -69,6 +72,8 @@ class AppPanel extends StatefulWidget {
   final AppSortMode sortMode;
   final ValueChanged<AppSortMode>? onSortModeChanged;
   final Color accent;
+  final List<AppShortcut> shortcuts;
+  final ValueChanged<AppShortcut>? onShortcutTap;
   final ValueChanged<bool> onExpandedChanged;
   final ValueChanged<AppItem> onAppTap;
   final ValueChanged<AppItem> onAppLongPress;
@@ -83,13 +88,15 @@ class _AppPanelState extends State<AppPanel> {
   final FocusNode _searchFocusNode = FocusNode();
   String _query = '';
   double _dragDownDistance = 0;
-  double _dragUpDistance = 0;
   bool _expandedTriggeredThisDrag = false;
 
   @override
   void initState() {
     super.initState();
     _scrollController = ScrollController();
+    _searchFocusNode.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -156,9 +163,7 @@ class _AppPanelState extends State<AppPanel> {
     } else {
       result = pool
           .where(
-            (a) =>
-                a.label.toLowerCase().contains(_query) ||
-                a.packageName.toLowerCase().contains(_query),
+            (a) => a.label.toLowerCase().contains(_query),
           )
           .toList();
     }
@@ -186,6 +191,15 @@ class _AppPanelState extends State<AppPanel> {
     return result;
   }
 
+  List<AppShortcut> get _matchingShortcuts {
+    if (_query.isEmpty) return const [];
+    return widget.shortcuts.where((s) {
+      final short = s.shortLabel.toLowerCase();
+      final long = s.longLabel?.toLowerCase() ?? '';
+      return short.contains(_query) || long.contains(_query);
+    }).take(6).toList();
+  }
+
   List<AppItem> get _recentApps {
     if (widget.recentAppIds.isEmpty) return const [];
     final byId = {for (final a in widget.allApps.isNotEmpty ? widget.allApps : widget.apps) a.id: a};
@@ -201,9 +215,12 @@ class _AppPanelState extends State<AppPanel> {
       (widget.isListMode ? DrawerMode.list : DrawerMode.grid);
 
   Widget _buildAppList(List<AppItem> displayApps, double listBottomPadding) {
+    // While searching, results stack up from just above the search bar.
+    final reverse = _query.isNotEmpty;
     switch (_effectiveMode) {
       case DrawerMode.list:
         return ListView.builder(
+          reverse: reverse,
           controller: _scrollController,
           itemExtent: 64, // performance optimization for 120Hz smooth scrolling
           padding: EdgeInsets.only(
@@ -212,9 +229,11 @@ class _AppPanelState extends State<AppPanel> {
             top: 4,
             bottom: listBottomPadding,
           ),
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
-          ),
+          physics: widget.isExpanded
+              ? const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                )
+              : const NeverScrollableScrollPhysics(),
           itemCount: displayApps.length,
           itemBuilder: (context, index) {
             final app = displayApps[index];
@@ -304,6 +323,7 @@ class _AppPanelState extends State<AppPanel> {
 
       case DrawerMode.grid:
         return GridView.builder(
+          reverse: reverse,
           controller: _scrollController,
           padding: EdgeInsets.only(
             left: TileMetrics.margin,
@@ -311,9 +331,11 @@ class _AppPanelState extends State<AppPanel> {
             top: 4,
             bottom: listBottomPadding,
           ),
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
-          ),
+          physics: widget.isExpanded
+              ? const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                )
+              : const NeverScrollableScrollPhysics(),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: TileMetrics.columns,
             mainAxisSpacing: TileMetrics.gap,
@@ -350,7 +372,7 @@ class _AppPanelState extends State<AppPanel> {
       children: [
         _PanelHandle(
           onToggle: () => widget.onExpandedChanged(!widget.isExpanded),
-          onDragUp: () => widget.onExpandedChanged(true),
+          onDragUp: () {},
           onDragDown: () => widget.onExpandedChanged(false),
         ),
 
@@ -358,7 +380,6 @@ class _AppPanelState extends State<AppPanel> {
           child: Listener(
             onPointerDown: (_) {
               _dragDownDistance = 0;
-              _dragUpDistance = 0;
               _expandedTriggeredThisDrag = false;
             },
             onPointerMove: (event) {
@@ -377,27 +398,14 @@ class _AppPanelState extends State<AppPanel> {
                 } else {
                   _dragDownDistance = 0;
                 }
-              } else {
-                // If NOT expanded and dragging upward -> expand
-                if (event.delta.dy < 0) {
-                  _dragUpDistance += -event.delta.dy;
-                  if (_dragUpDistance > 24) {
-                    _expandedTriggeredThisDrag = true;
-                    widget.onExpandedChanged(true);
-                  }
-                } else {
-                  _dragUpDistance = 0;
-                }
               }
             },
             onPointerUp: (_) {
               _dragDownDistance = 0;
-              _dragUpDistance = 0;
               _expandedTriggeredThisDrag = false;
             },
             onPointerCancel: (_) {
               _dragDownDistance = 0;
-              _dragUpDistance = 0;
               _expandedTriggeredThisDrag = false;
             },
             child: NotificationListener<ScrollNotification>(
@@ -407,13 +415,6 @@ class _AppPanelState extends State<AppPanel> {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted && widget.isExpanded) {
                         widget.onExpandedChanged(false);
-                      }
-                    });
-                  } else if (!widget.isExpanded &&
-                      notification.overscroll > 12) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted && !widget.isExpanded) {
-                        widget.onExpandedChanged(true);
                       }
                     });
                   }
@@ -434,24 +435,8 @@ class _AppPanelState extends State<AppPanel> {
                       colors: [Colors.black, Colors.black],
                     ).createShader(rect);
                   }
-                  final dockTop = (h - widget.dockHeight).clamp(0.0, h);
-                  final fadeStart =
-                      ((dockTop - widget.metrics.tileSize * 0.6) / h).clamp(
-                        0.0,
-                        1.0,
-                      );
-                  final fadeEnd = (dockTop / h).clamp(fadeStart, 1.0);
-
-                  return LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: [0.0, fadeStart, fadeEnd, 1.0],
-                    colors: const [
-                      Colors.black,
-                      Colors.black,
-                      Colors.transparent,
-                      Colors.transparent,
-                    ],
+                  return const LinearGradient(
+                    colors: [Colors.black, Colors.black],
                   ).createShader(rect);
                 },
                 child: _buildAppList(displayApps, listBottomPadding),
@@ -472,74 +457,66 @@ class _AppPanelState extends State<AppPanel> {
                     top: 6,
                     bottom: widget.dockHeight + 8,
                   ),
-                  child: Container(
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1E),
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.40),
-                          blurRadius: 16,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.search_rounded,
-                          color: Colors.white54,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            focusNode: _searchFocusNode,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              letterSpacing: -0.5,
-                              fontSize: 14,
-                            ),
-                            onChanged: (val) => setState(
-                              () => _query = val.trim().toLowerCase(),
-                            ),
-                            decoration: const InputDecoration(
-                              hintText: 'Search for apps',
-                              hintStyle: TextStyle(
-                                color: Colors.white38,
-                                fontSize: 14,
-                              ),
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              errorBorder: InputBorder.none,
-                              disabledBorder: InputBorder.none,
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                          ),
-                        ),
-                        if (_query.isNotEmpty)
-                          GestureDetector(
-                            onTap: () {
-                              _searchController.clear();
-                              setState(() => _query = '');
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_query.isNotEmpty && _matchingShortcuts.isNotEmpty) ...[
+                        SizedBox(
+                          height: 36,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _matchingShortcuts.length,
+                            separatorBuilder: (_, _) => const SizedBox(width: 8),
+                            itemBuilder: (context, index) {
+                              final s = _matchingShortcuts[index];
+                              return M3SpringButton(
+                                onTap: () {
+                                  widget.onShortcutTap?.call(s);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF222624),
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (s.icon.isNotEmpty) ...[
+                                        Image.memory(s.icon, width: 16, height: 16),
+                                        const SizedBox(width: 6),
+                                      ] else ...[
+                                        Icon(Icons.bolt_rounded, size: 16, color: widget.accent),
+                                        const SizedBox(width: 6),
+                                      ],
+                                      Text(
+                                        s.displayLabel,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
                             },
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 4),
-                              child: Icon(
-                                Icons.close_rounded,
-                                color: Colors.white54,
-                                size: 18,
-                              ),
-                            ),
                           ),
-                        const SizedBox(width: 4),
-                        // Sort Mode Menu Button (A-Z, Z-A, Most Recently Used)
-                        PopupMenuButton<AppSortMode>(
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      Container(
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: widget.accent,
+                          borderRadius: BorderRadius.circular(28),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
+                        child: Row(
+                          children: [
+                            // Filter / Sort Menu Button
+                            PopupMenuButton<AppSortMode>(
                           tooltip: 'Sort Apps',
                           color: const Color(0xFF262626),
                           shape: RoundedRectangleBorder(
@@ -550,20 +527,12 @@ class _AppPanelState extends State<AppPanel> {
                             HapticFeedback.lightImpact();
                             widget.onSortModeChanged?.call(mode);
                           },
-                          icon: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2E2E2E),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
                             child: Icon(
-                              widget.sortMode == AppSortMode.recent
-                                  ? Icons.history_rounded
-                                  : (widget.sortMode == AppSortMode.za
-                                      ? Icons.sort_by_alpha_rounded
-                                      : Icons.sort_rounded),
-                              color: widget.accent,
-                              size: 18,
+                              Icons.tune_rounded,
+                              color: LauncherColors.readableOn(widget.accent),
+                              size: 22,
                             ),
                           ),
                           itemBuilder: (context) => [
@@ -641,11 +610,95 @@ class _AppPanelState extends State<AppPanel> {
                             ),
                           ],
                         ),
+                        const SizedBox(width: 4),
+
+                        // Nested dark pill text field container
+                        Expanded(
+                          child: Container(
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF181818),
+                              borderRadius: BorderRadius.circular(22),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.search_rounded,
+                                  color: Colors.white54,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _searchController,
+                                    focusNode: _searchFocusNode,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      letterSpacing: -0.2,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    cursorColor: widget.accent,
+                                    textInputAction: TextInputAction.go,
+                                    onChanged: (val) {
+                                      setState(() => _query = val.trim().toLowerCase());
+                                      if (_scrollController.hasClients) {
+                                        _scrollController.jumpTo(0);
+                                      }
+                                    },
+                                    onSubmitted: (_) {
+                                      if (_query.isEmpty) return;
+                                      final results = _sortedAndFilteredApps;
+                                      if (results.isNotEmpty) {
+                                        widget.onAppTap(results.first);
+                                      } else if (_matchingShortcuts.isNotEmpty) {
+                                        widget.onShortcutTap?.call(_matchingShortcuts.first);
+                                      }
+                                    },
+                                    decoration: const InputDecoration(
+                                      hintText: 'Search for apps',
+                                      hintStyle: TextStyle(
+                                        color: Colors.white38,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                      border: InputBorder.none,
+                                      enabledBorder: InputBorder.none,
+                                      focusedBorder: InputBorder.none,
+                                      errorBorder: InputBorder.none,
+                                      disabledBorder: InputBorder.none,
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                  ),
+                                ),
+                                if (_query.isNotEmpty)
+                                  GestureDetector(
+                                    onTap: () {
+                                      _searchController.clear();
+                                      setState(() => _query = '');
+                                    },
+                                    child: const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 4),
+                                      child: Icon(
+                                        Icons.close_rounded,
+                                        color: Colors.white54,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                )
-              : const SizedBox(width: double.infinity, height: 0),
+                ],
+              ),
+            )
+          : const SizedBox(width: double.infinity, height: 0),
         ),
       ],
     );

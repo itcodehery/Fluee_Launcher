@@ -1,14 +1,17 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluee_launcher/main.dart';
 import 'package:fluee_launcher/models/app_item.dart';
+import 'package:fluee_launcher/models/app_shortcut.dart';
 import 'package:fluee_launcher/services/launcher_platform.dart';
 import 'package:fluee_launcher/services/launcher_preferences.dart';
 import 'package:fluee_launcher/widgets/app_panel.dart';
 import 'package:fluee_launcher/widgets/app_tile.dart';
 import 'package:fluee_launcher/widgets/launcher_clock.dart';
-import 'package:fluee_launcher/widgets/quick_settings_watch.dart';
+import 'package:fluee_launcher/widgets/quick_apps_panel.dart';
 
 void main() {
   testWidgets('Launcher renders home screen', (WidgetTester tester) async {
@@ -55,46 +58,37 @@ void main() {
     expect(clockTapped || weatherTapped, true);
   });
 
-  testWidgets('QuickSettingsPanel renders inline quick settings and morphs',
+  testWidgets('QuickAppsPanel renders battery pill, 6 slots and status pill',
       (WidgetTester tester) async {
     final platform = LauncherPlatform();
     bool closed = false;
+    final tapped = <int>[];
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: QuickSettingsPanel(
+          body: QuickAppsPanel(
             accent: const Color(0xFFD0BCFF),
             platform: platform,
+            slots: List<AppItem?>.filled(maxQuickApps, null),
             onClose: () => closed = true,
+            onAppTap: (_) {},
+            onAppLongPress: (_) {},
+            onEmptySlotTap: tapped.add,
           ),
         ),
       ),
     );
 
-    // Verify top 3 buttons (Flashlight, DnD, Auto-brightness)
-    expect(find.byIcon(Icons.bolt_rounded), findsOneWidget); // Torch
-    expect(find.byIcon(Icons.notifications_off_outlined), findsOneWidget); // DnD
-    expect(find.byIcon(Icons.brightness_auto_rounded), findsOneWidget); // Auto-brightness
-
-    // Verify 6 options in two rows (Night Light, Airplane Mode, Wifi, Auto-rotate, Camera, Settings)
-    expect(find.byIcon(Icons.nightlight_round), findsOneWidget); // Night Light
-    expect(find.byIcon(Icons.airplanemode_active_rounded), findsOneWidget); // Airplane
-    expect(find.byIcon(Icons.wifi_off_rounded), findsOneWidget); // Wifi
-    expect(find.byIcon(Icons.screen_rotation_rounded), findsOneWidget); // Auto-rotate
-    expect(find.byIcon(Icons.photo_camera_rounded), findsOneWidget); // Camera access
-    expect(find.byIcon(Icons.settings_rounded), findsOneWidget); // Settings
-
-    // Bottom pill
+    expect(find.byIcon(Icons.add_rounded), findsNWidgets(6));
     expect(find.byIcon(Icons.alarm_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.wifi_rounded), findsOneWidget);
+    expect(find.textContaining('%'), findsOneWidget);
 
-    // Drag down to trigger morph
-    await tester.drag(find.byIcon(Icons.nightlight_round), const Offset(0, 50));
-    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_rounded).first);
+    expect(tapped, [0]);
 
-    // Tap drag handle to close
-    final dragHandle = find.byType(GestureDetector).last;
-    await tester.tap(dragHandle);
+    await tester.tap(find.byType(GestureDetector).last);
     expect(closed, true);
   });
 
@@ -273,5 +267,46 @@ void main() {
     // Verify list mode renders app labels
     expect(find.text('Chrome'), findsOneWidget);
     expect(find.text('Camera'), findsOneWidget);
+  });
+
+  test('AppShortcut model decodes correctly', () {
+    final shortcut = AppShortcut.fromMap({
+      'id': 'new_tab',
+      'packageName': 'com.android.chrome',
+      'shortLabel': 'New tab',
+      'longLabel': 'Open a new tab',
+      'icon': [1, 2, 3],
+    });
+    expect(shortcut.id, 'new_tab');
+    expect(shortcut.packageName, 'com.android.chrome');
+    expect(shortcut.shortLabel, 'New tab');
+    expect(shortcut.displayLabel, 'Open a new tab');
+    expect(shortcut.icon, isNotEmpty);
+  });
+
+  test('LauncherPreferences backup and restore round-trip', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await LauncherPreferences.load();
+    await prefs.setQuickAppIds(['app1', 'app2']);
+    await prefs.setHiddenAppIds({'hidden1'});
+    await prefs.setCustomLabel('app1', 'Custom App 1');
+    await prefs.setCustomAccent(const Color(0xFF123456));
+
+    final exported = prefs.exportBackupJson();
+    expect(exported['quickAppIds'], ['app1', 'app2']);
+    expect(exported['hiddenAppIds'], ['hidden1']);
+    expect(exported['customLabelMap'], {'app1': 'Custom App 1'});
+
+    // Clear and restore
+    SharedPreferences.setMockInitialValues({});
+    final freshPrefs = await LauncherPreferences.load();
+    final jsonStr = jsonEncode(exported);
+    final success = await freshPrefs.importBackupJson(jsonStr);
+
+    expect(success, true);
+    expect(freshPrefs.quickAppIds, ['app1', 'app2']);
+    expect(freshPrefs.hiddenAppIds, {'hidden1'});
+    expect(freshPrefs.customLabelMap, {'app1': 'Custom App 1'});
+    expect(freshPrefs.customAccent.toARGB32(), const Color(0xFF123456).toARGB32());
   });
 }

@@ -44,7 +44,6 @@ class LauncherBridge(private val context: Context) :
     private val iconPx: Int =
         (ICON_BITMAP_DP * context.resources.displayMetrics.density).roundToInt().coerceIn(96, 192)
     private val greyscale = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
-    private var isTorchOn: Boolean = false
 
     private var packageCallback: LauncherApps.Callback? = null
 
@@ -52,6 +51,57 @@ class LauncherBridge(private val context: Context) :
     private val iconPackCache = ConcurrentHashMap<String, Map<String, String>>()
     // Memory cache for rendered app icon PNG bytes: key is "$pkg/$activityName#$serial@$iconPack"
     private val renderedIconCache = ConcurrentHashMap<String, Pair<ByteArray, Boolean>>()
+
+    private var pendingExportContent: String? = null
+    private var pendingExportResult: MethodChannel.Result? = null
+    private var pendingImportResult: MethodChannel.Result? = null
+
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        when (requestCode) {
+            REQUEST_CODE_CREATE_BACKUP -> {
+                val res = pendingExportResult
+                val content = pendingExportContent
+                pendingExportResult = null
+                pendingExportContent = null
+                if (resultCode == android.app.Activity.RESULT_OK && data?.data != null && content != null) {
+                    worker.execute {
+                        try {
+                            context.contentResolver.openOutputStream(data.data!!)?.use { os ->
+                                os.write(content.toByteArray(Charsets.UTF_8))
+                                os.flush()
+                            }
+                            mainHandler.post { res?.success(true) }
+                        } catch (_: Exception) {
+                            mainHandler.post { res?.success(false) }
+                        }
+                    }
+                } else {
+                    res?.success(false)
+                }
+                return true
+            }
+            REQUEST_CODE_OPEN_BACKUP -> {
+                val res = pendingImportResult
+                pendingImportResult = null
+                if (resultCode == android.app.Activity.RESULT_OK && data?.data != null) {
+                    worker.execute {
+                        try {
+                            val text = context.contentResolver.openInputStream(data.data!!)?.use { stream ->
+                                stream.bufferedReader(Charsets.UTF_8).readText()
+                            }
+                            mainHandler.post { res?.success(text) }
+                        } catch (_: Exception) {
+                            mainHandler.post { res?.success(null) }
+                        }
+                    }
+                } else {
+                    res?.success(null)
+                }
+                return true
+            }
+        }
+        return false
+    }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -131,117 +181,90 @@ class LauncherBridge(private val context: Context) :
                 result.success(opened)
             }
 
-            "openWifiSettings" -> {
-                startSafely(Intent(Settings.ACTION_WIFI_SETTINGS))
-                result.success(null)
-            }
-
-            "openSoundSettings" -> {
-                startSafely(Intent(Settings.ACTION_SOUND_SETTINGS))
-                result.success(null)
-            }
-
-            "openBatterySettings" -> {
+            "getVolume" -> {
                 try {
-                    context.startActivity(
-                        Intent(Intent.ACTION_POWER_USAGE_SUMMARY)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
+                    val am = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                    result.success(am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toDouble() / max)
                 } catch (_: Exception) {
-                    startSafely(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
+                    result.success(null)
                 }
-                result.success(null)
             }
 
-            "openAirplaneSettings" -> {
-                startSafely(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS))
-                result.success(null)
-            }
-
-            "openDisplaySettings" -> {
-                startSafely(Intent(Settings.ACTION_DISPLAY_SETTINGS))
-                result.success(null)
-            }
-
-            "openDndSettings" -> {
-                startSafely(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
-                result.success(null)
-            }
-
-            "openSystemSettings" -> {
-                startSafely(Intent(Settings.ACTION_SETTINGS))
-                result.success(null)
-            }
-
-            "openAutoRotateSettings" -> {
-                startSafely(Intent(Settings.ACTION_AUTO_ROTATE_SETTINGS))
-                result.success(null)
-            }
-
-            "openNightLightSettings" -> {
+            "setVolume" -> {
                 try {
-                    context.startActivity(
-                        Intent(Settings.ACTION_NIGHT_DISPLAY_SETTINGS)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                } catch (_: Exception) {
-                    startSafely(Intent(Settings.ACTION_DISPLAY_SETTINGS))
-                }
-                result.success(null)
-            }
-
-            "openCamera" -> {
-                startSafely(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
-                result.success(null)
-            }
-
-            "openBluetoothSettings" -> {
-                startSafely(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                result.success(null)
-            }
-
-            "isAirplaneModeOn" -> {
-                try {
-                    val state = Settings.Global.getInt(
-                        context.contentResolver,
-                        Settings.Global.AIRPLANE_MODE_ON,
+                    val fraction = (call.argument<Number>("value")?.toDouble() ?: 0.0).coerceIn(0.0, 1.0)
+                    val am = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                    am.setStreamVolume(
+                        android.media.AudioManager.STREAM_MUSIC,
+                        (fraction * max).roundToInt().coerceIn(0, max),
                         0
                     )
-                    result.success(state != 0)
-                } catch (_: Exception) {
-                    result.success(false)
-                }
-            }
-
-            "isWifiEnabled" -> {
-                try {
-                    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
-                    result.success(wifiManager?.isWifiEnabled ?: false)
-                } catch (_: Exception) {
-                    result.success(false)
-                }
-            }
-
-            "isAutoRotateOn" -> {
-                try {
-                    val state = Settings.System.getInt(
-                        context.contentResolver,
-                        Settings.System.ACCELEROMETER_ROTATION,
-                        0
-                    )
-                    result.success(state == 1)
-                } catch (_: Exception) {
                     result.success(true)
+                } catch (_: Exception) {
+                    result.success(false)
                 }
             }
 
-            "isDndOn" -> {
+            "getBrightness" -> {
                 try {
-                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-                    val filter = nm?.currentInterruptionFilter
-                    result.success(filter != null && filter != android.app.NotificationManager.INTERRUPTION_FILTER_ALL)
+                    val v = Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
+                    result.success(v / 255.0)
+                } catch (_: Exception) {
+                    result.success(null)
+                }
+            }
+
+            "canWriteSettings" -> {
+                result.success(Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.System.canWrite(context))
+            }
+
+            "openWriteSettings" -> {
+                startSafely(
+                    Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + context.packageName))
+                )
+                result.success(null)
+            }
+
+            "setBrightness" -> {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.System.canWrite(context)) {
+                        result.success(false)
+                    } else {
+                        val fraction = (call.argument<Number>("value")?.toDouble() ?: 0.5).coerceIn(0.0, 1.0)
+                        Settings.System.putInt(
+                            context.contentResolver,
+                            Settings.System.SCREEN_BRIGHTNESS_MODE,
+                            Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+                        )
+                        Settings.System.putInt(
+                            context.contentResolver,
+                            Settings.System.SCREEN_BRIGHTNESS,
+                            (fraction * 255).roundToInt().coerceIn(1, 255)
+                        )
+                        result.success(true)
+                    }
                 } catch (_: Exception) {
                     result.success(false)
+                }
+            }
+
+            "getBatteryLevel" -> {
+                try {
+                    val intent = context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    val level = intent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                    val scale = intent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+                    val status = intent?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+                    val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                        status == android.os.BatteryManager.BATTERY_STATUS_FULL
+                    if (level >= 0 && scale > 0) {
+                        result.success(mapOf("level" to (level * 100 / scale), "charging" to charging))
+                    } else {
+                        result.success(null)
+                    }
+                } catch (_: Exception) {
+                    result.success(null)
                 }
             }
 
@@ -277,22 +300,8 @@ class LauncherBridge(private val context: Context) :
                 }
             }
 
-            "toggleFlashlight" -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    val cm = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
-                    if (cm != null) {
-                        try {
-                            val cameraId = cm.cameraIdList.firstOrNull()
-                            if (cameraId != null) {
-                                isTorchOn = !isTorchOn
-                                cm.setTorchMode(cameraId, isTorchOn)
-                                result.success(isTorchOn)
-                                return
-                            }
-                        } catch (_: Exception) {}
-                    }
-                }
-                result.success(false)
+            "showPowerMenu" -> {
+                result.success(LauncherAccessibilityService.showPowerMenu())
             }
 
             "lockScreen" -> {
@@ -417,6 +426,139 @@ class LauncherBridge(private val context: Context) :
             "openHomeSettings" -> {
                 startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
                 result.success(null)
+            }
+
+            "getShortcuts" -> {
+                val packageName = call.argument<String>("packageName")
+                val user = call.user()
+                worker.execute {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1 && launcherApps.hasShortcutHostPermission()) {
+                            val query = LauncherApps.ShortcutQuery().apply {
+                                setQueryFlags(
+                                    LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
+                                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+                                )
+                                if (!packageName.isNullOrEmpty()) {
+                                    setPackage(packageName)
+                                }
+                            }
+                            val shortcuts = launcherApps.getShortcuts(query, user) ?: emptyList()
+                            val list = shortcuts.mapNotNull { s ->
+                                val id = s.id
+                                val pkg = s.`package`
+                                val shortLabel = s.shortLabel?.toString() ?: s.longLabel?.toString() ?: ""
+                                val longLabel = s.longLabel?.toString() ?: shortLabel
+                                if (shortLabel.isEmpty()) return@mapNotNull null
+                                val drawable = try {
+                                    launcherApps.getShortcutIconDrawable(s, context.resources.displayMetrics.densityDpi)
+                                } catch (_: Exception) { null }
+                                val iconBytes = drawable?.let { d ->
+                                    val bmp = Bitmap.createBitmap(iconPx, iconPx, Bitmap.Config.ARGB_8888)
+                                    val c = Canvas(bmp)
+                                    d.setBounds(0, 0, iconPx, iconPx)
+                                    d.draw(c)
+                                    val stream = ByteArrayOutputStream()
+                                    bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                                    stream.toByteArray()
+                                }
+                                mapOf(
+                                    "id" to id,
+                                    "packageName" to pkg,
+                                    "shortLabel" to shortLabel,
+                                    "longLabel" to longLabel,
+                                    "icon" to (iconBytes ?: ByteArray(0))
+                                )
+                            }
+                            mainHandler.post { result.success(list) }
+                        } else {
+                            mainHandler.post { result.success(emptyList<Map<String, Any>>()) }
+                        }
+                    } catch (_: Exception) {
+                        mainHandler.post { result.success(emptyList<Map<String, Any>>()) }
+                    }
+                }
+            }
+
+            "startShortcut" -> {
+                val packageName = call.argument<String>("packageName") ?: ""
+                val shortcutId = call.argument<String>("shortcutId") ?: ""
+                val user = call.user()
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+                        launcherApps.startShortcut(packageName, shortcutId, null, null, user)
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                } catch (e: Exception) {
+                    result.error("SHORTCUT_FAILED", e.message, null)
+                }
+            }
+
+            "exportBackupFile" -> {
+                val content = call.argument<String>("content") ?: ""
+                val fileName = call.argument<String>("fileName") ?: "fluee_backup_${System.currentTimeMillis()}.json"
+                val act = context as? android.app.Activity
+                if (act != null) {
+                    pendingExportContent = content
+                    pendingExportResult = result
+                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_TITLE, fileName)
+                    }
+                    try {
+                        act.startActivityForResult(intent, REQUEST_CODE_CREATE_BACKUP)
+                    } catch (e: Exception) {
+                        pendingExportResult = null
+                        pendingExportContent = null
+                        result.error("EXPORT_FAILED", e.message, null)
+                    }
+                } else {
+                    result.error("NO_ACTIVITY", "Activity not available for file picker", null)
+                }
+            }
+
+            "importBackupFile" -> {
+                val act = context as? android.app.Activity
+                if (act != null) {
+                    pendingImportResult = result
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "text/plain"))
+                    }
+                    try {
+                        act.startActivityForResult(intent, REQUEST_CODE_OPEN_BACKUP)
+                    } catch (e: Exception) {
+                        pendingImportResult = null
+                        result.error("IMPORT_FAILED", e.message, null)
+                    }
+                } else {
+                    result.error("NO_ACTIVITY", "Activity not available for file picker", null)
+                }
+            }
+
+            "shareBackup" -> {
+                val content = call.argument<String>("content") ?: ""
+                val title = call.argument<String>("title") ?: "Fluee Launcher Backup"
+                try {
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, title)
+                        putExtra(Intent.EXTRA_TEXT, content)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    val chooser = Intent.createChooser(intent, "Share Fluee Backup").apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(chooser)
+                    result.success(true)
+                } catch (_: Exception) {
+                    result.success(false)
+                }
             }
 
             "wallpaperAccent" -> {
@@ -738,5 +880,7 @@ class LauncherBridge(private val context: Context) :
         const val METHOD_CHANNEL = "fluee/launcher"
         const val EVENT_CHANNEL = "fluee/app_changes"
         private const val ICON_BITMAP_DP = 64f
+        const val REQUEST_CODE_CREATE_BACKUP = 2001
+        const val REQUEST_CODE_OPEN_BACKUP = 2002
     }
 }
