@@ -16,6 +16,7 @@ import 'widgets/intro_flow.dart';
 import 'widgets/launcher_clock.dart';
 import 'widgets/profile_dashboard.dart';
 import 'widgets/quick_apps_panel.dart';
+import 'widgets/quick_tasks_bar.dart';
 import 'widgets/settings_sheet.dart';
 
 void main() {
@@ -62,6 +63,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   List<AppItem> _allApps = const [];
   Set<String> _hiddenAppIds = <String>{};
   List<AppShortcut> _allShortcuts = const [];
+  List<PinnedQuickTask> _pinnedQuickTasks = const [];
   List<String> _quickIds = List<String>.filled(maxQuickApps, '');
   List<IconPackInfo> _availableIconPacks = const [];
   String? _selectedIconPack;
@@ -80,8 +82,17 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   bool _isIdle = false;
   Timer? _idleTimer;
   Timer? _mediaPollTimer;
+  Timer? _batteryPollTimer;
+  int? _batteryLevel;
+  bool _isCharging = false;
   String? _mediaTitle;
   String? _mediaArtist;
+  String? _mediaPackageName;
+  Uint8List? _mediaAlbumArt;
+  bool _mediaIsPlaying = false;
+  int? _mediaArtId;
+
+  final LauncherClockController _clockController = LauncherClockController();
 
   Color _customAccent = LauncherColors.defaultAccent;
   Color? _wallpaperAccent;
@@ -172,6 +183,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _hideStatusBar();
+      _syncBattery();
     }
   }
 
@@ -215,11 +227,13 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
       _availableIconPacks = iconPacks;
       _allApps = apps;
       _quickIds = _normalizeQuick(prefs.quickAppIds);
+      _pinnedQuickTasks = prefs.pinnedQuickTasks;
       _isInitialized = true;
     });
 
     _resetIdleTimer();
     _startMediaPolling();
+    _startBatteryPolling();
     _loadShortcuts();
     _pkgSub = _platform.packageChanges.listen((_) {
       _reloadApps();
@@ -247,6 +261,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
       _profileName = _prefs!.profileName;
       _profilePhoto = _prefs!.profilePhoto;
       _quickIds = _normalizeQuick(_prefs!.quickAppIds);
+      _pinnedQuickTasks = _prefs!.pinnedQuickTasks;
       _hiddenAppIds = _prefs!.hiddenAppIds;
       _selectedIconPack = _prefs!.selectedIconPack;
       _customLabelMap = _prefs!.customLabelMap;
@@ -254,6 +269,25 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     });
     _reloadApps();
     _loadShortcuts();
+  }
+
+  void _startBatteryPolling() {
+    _batteryPollTimer?.cancel();
+    _syncBattery();
+    _batteryPollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _syncBattery();
+    });
+  }
+
+  Future<void> _syncBattery() async {
+    final battery = await _platform.getBattery();
+    if (!mounted || battery == null) return;
+    if (battery.level != _batteryLevel || battery.charging != _isCharging) {
+      setState(() {
+        _batteryLevel = battery.level;
+        _isCharging = battery.charging;
+      });
+    }
   }
 
   void _startMediaPolling() {
@@ -267,19 +301,52 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   Future<void> _checkMediaTrack() async {
     final track = await _platform.getMediaTrack();
     if (!mounted) return;
-    if (track != null && track['isPlaying'] == true) {
-      final title = track['title'] as String?;
-      final artist = track['artist'] as String?;
-      if (title != _mediaTitle || artist != _mediaArtist) {
+
+    final title = track?['title'] as String?;
+    if (track == null || title == null || title.isEmpty) {
+      if (_mediaTitle != null || _mediaPackageName != null) {
         setState(() {
-          _mediaTitle = title;
-          _mediaArtist = artist;
+          _mediaTitle = null;
+          _mediaArtist = null;
+          _mediaPackageName = null;
+          _mediaAlbumArt = null;
+          _mediaIsPlaying = false;
+          _mediaArtId = null;
         });
       }
-    } else if (_mediaTitle != null) {
+      return;
+    }
+
+    final artist = (track['artist'] as String?) ?? '';
+    final packageName = (track['packageName'] as String?) ?? '';
+    final isPlaying = track['isPlaying'] == true;
+    final artId = track['artId'] as int?;
+
+    // The native side only sends album art bytes when the artwork changed; otherwise the
+    // previously decoded image is kept so it is not decoded again on every poll.
+    var albumArt = _mediaAlbumArt;
+    final rawArt = track['albumArt'];
+    if (rawArt is Uint8List) {
+      albumArt = rawArt.isEmpty ? null : rawArt;
+    } else if (rawArt is List) {
+      final bytes = Uint8List.fromList(rawArt.cast<int>());
+      albumArt = bytes.isEmpty ? null : bytes;
+    } else if (artId == null || artId != _mediaArtId) {
+      albumArt = null;
+    }
+
+    if (title != _mediaTitle ||
+        artist != _mediaArtist ||
+        packageName != _mediaPackageName ||
+        isPlaying != _mediaIsPlaying ||
+        artId != _mediaArtId) {
       setState(() {
-        _mediaTitle = null;
-        _mediaArtist = null;
+        _mediaTitle = title;
+        _mediaArtist = artist;
+        _mediaPackageName = packageName;
+        _mediaAlbumArt = albumArt;
+        _mediaIsPlaying = isPlaying;
+        _mediaArtId = artId;
       });
     }
   }
@@ -343,6 +410,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   void dispose() {
     _idleTimer?.cancel();
     _mediaPollTimer?.cancel();
+    _batteryPollTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _pkgSub?.cancel();
     super.dispose();
@@ -422,6 +490,116 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     );
   }
 
+  Future<void> _setPinnedQuickTasks(List<PinnedQuickTask> tasks) async {
+    final capped = tasks.take(maxPinnedQuickTasks).toList();
+    setState(() => _pinnedQuickTasks = capped);
+    await _prefs?.setPinnedQuickTasks(capped);
+  }
+
+  Future<void> _togglePinShortcut(AppShortcut s) async {
+    final key = '${s.packageName}/${s.id}';
+    final current = List<PinnedQuickTask>.from(_pinnedQuickTasks);
+    final existingIdx = current.indexWhere((t) => t.key == key);
+    if (existingIdx >= 0) {
+      current.removeAt(existingIdx);
+      await _setPinnedQuickTasks(current);
+      return;
+    }
+    if (current.length >= maxPinnedQuickTasks) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Up to 2 quick tasks can be pinned. Unpin one first.'),
+        ),
+      );
+      return;
+    }
+    current.add(
+      PinnedQuickTask(
+        packageName: s.packageName,
+        shortcutId: s.id,
+        label: s.displayLabel,
+      ),
+    );
+    await _setPinnedQuickTasks(current);
+  }
+
+  void _pickQuickTask({int? replaceIndex}) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetCtx) => QuickTaskPickerSheet(
+        shortcuts: _allShortcuts,
+        apps: _visibleApps,
+        accent: _effectiveAccent,
+        pinnedKeys: _pinnedQuickTasks.map((t) => t.key).toSet(),
+        onSelected: (shortcut) {
+          Navigator.pop(sheetCtx);
+          final next = PinnedQuickTask(
+            packageName: shortcut.packageName,
+            shortcutId: shortcut.id,
+            label: shortcut.displayLabel,
+          );
+          final updated = List<PinnedQuickTask>.from(_pinnedQuickTasks);
+          updated.removeWhere((t) => t.key == next.key);
+          if (replaceIndex != null && replaceIndex < updated.length) {
+            updated[replaceIndex] = next;
+          } else if (updated.length < maxPinnedQuickTasks) {
+            updated.add(next);
+          } else {
+            updated[maxPinnedQuickTasks - 1] = next;
+          }
+          _setPinnedQuickTasks(updated);
+        },
+      ),
+    );
+  }
+
+  void _showQuickTaskMenu(int index, PinnedQuickTask task) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                task.label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: Icon(Icons.swap_horiz_rounded, color: _effectiveAccent),
+                title: const Text('Replace quick task', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _pickQuickTask(replaceIndex: index);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.push_pin_outlined, color: LauncherColors.danger),
+                title: const Text('Unpin from home', style: TextStyle(color: LauncherColors.danger)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  final updated = List<PinnedQuickTask>.from(_pinnedQuickTasks)
+                    ..removeAt(index);
+                  _setPinnedQuickTasks(updated);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showAppActions(AppItem app) {
     final isQuickPinned = _quickIds.contains(app.id);
     final isQuickFull = _quickSlots.every((a) => a != null);
@@ -437,6 +615,8 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
         onShortcutTap: (s) {
           _platform.startShortcut(s.packageName, s.id);
         },
+        pinnedTaskKeys: _pinnedQuickTasks.map((t) => t.key).toSet(),
+        onTogglePinShortcut: _togglePinShortcut,
         onRenameApp: () {
           Navigator.pop(sheetCtx);
           _showRenameDialog(app);
@@ -630,6 +810,9 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
           profileName: _profileName,
           profilePhoto: _profilePhoto,
           quickAppCount: _quickIds.where((id) => id.isNotEmpty).length,
+          pinnedQuickTasks: _pinnedQuickTasks,
+          allShortcuts: _allShortcuts,
+          onPinnedQuickTasksChanged: _setPinnedQuickTasks,
           prefs: _prefs,
           platform: _platform,
           onBackupRestored: _onBackupRestored,
@@ -901,28 +1084,46 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                         alignment: Alignment.topCenter,
                         child: LauncherClock(
                           accent: _effectiveAccent,
+                          batteryLevel: _batteryLevel,
+                          isCharging: _isCharging,
                           onTap: _platform.openAlarms,
+                          controller: _clockController,
                           dashboard: ProfileDashboard(
                             accent: _effectiveAccent,
                             platform: _platform,
                             name: _profileName,
                             photo: _profilePhoto,
+                            onCollapse: _clockController.collapse,
+                            onSettingsTap: _openSettingsPage,
                           ),
                           onDateTap: _openCalendar,
                           onSettingsTap: _openSettingsPage,
                           isIdle: _isIdle,
                           mediaTitle: _mediaTitle,
                           mediaArtist: _mediaArtist,
+                          mediaIsPlaying: _mediaIsPlaying,
                           customAmbientText: _ambientCustomText,
-                          onMediaTap: () => _platform.launch(
-                            _allApps.firstWhere(
+                          onMediaTap: () {
+                            if (_allApps.isEmpty) return;
+                            AppItem? target;
+                            if (_mediaPackageName != null &&
+                                _mediaPackageName!.isNotEmpty) {
+                              for (final a in _allApps) {
+                                if (a.packageName == _mediaPackageName) {
+                                  target = a;
+                                  break;
+                                }
+                              }
+                            }
+                            target ??= _allApps.firstWhere(
                               (a) =>
                                   a.packageName.contains('music') ||
                                   a.packageName.contains('spotify') ||
                                   a.packageName.contains('audio'),
                               orElse: () => _allApps.first,
-                            ),
-                          ),
+                            );
+                            _launchApp(target);
+                          },
                           onWeatherTap: () {
                             if (_isQuickSettingsOpen) {
                               _hideQuickSettings();
@@ -935,6 +1136,39 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                     ),
                   ),
                 ),
+
+                // Pinned quick tasks (up to 2) right above the app drawer handle
+                if (_pinnedQuickTasks.isNotEmpty)
+                  AnimatedPositioned(
+                    duration: animDuration,
+                    curve: Curves.easeOutCubic,
+                    left: 0,
+                    right: 0,
+                    bottom: (_isQuickSettingsOpen || _isIdle)
+                        ? -(QuickTasksBar.barHeight + 24)
+                        : (collapsedH + 8),
+                    child: IgnorePointer(
+                      ignoring: _isPanelExpanded || _isQuickSettingsOpen || _isIdle || drawerT > 0.25,
+                      child: AnimatedOpacity(
+                        duration: _isDraggingQs
+                            ? Duration.zero
+                            : const Duration(milliseconds: 180),
+                        opacity: (_isQuickSettingsOpen || _isIdle)
+                            ? 0.0
+                            : (1.0 - drawerT * 2.5).clamp(0.0, 1.0),
+                        child: QuickTasksBar(
+                          tasks: _pinnedQuickTasks,
+                          shortcuts: _allShortcuts,
+                          accent: _effectiveAccent,
+                          onTaskTap: (task) {
+                            _platform.startShortcut(task.packageName, task.shortcutId);
+                          },
+                          onTaskLongPress: _showQuickTaskMenu,
+                          onAddTap: () => _pickQuickTask(),
+                        ),
+                      ),
+                    ),
+                  ),
 
                 // Bottom half / expandable app grid panel (moves down out of sight when Quick Settings or Ambient Mode is open)
                 AnimatedPositioned(
@@ -970,6 +1204,11 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                     },
                     accent: _effectiveAccent,
                     shortcuts: _allShortcuts,
+                    mediaPackageName: _mediaPackageName,
+                    mediaTitle: _mediaTitle,
+                    mediaArtist: _mediaArtist,
+                    mediaAlbumArt: _mediaAlbumArt,
+                    mediaIsPlaying: _mediaIsPlaying,
                     onShortcutTap: (s) {
                       _platform.startShortcut(s.packageName, s.id);
                     },

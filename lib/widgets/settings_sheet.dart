@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/app_item.dart';
+import '../models/app_shortcut.dart';
 import '../services/launcher_platform.dart';
 import '../services/launcher_preferences.dart';
 import '../theme/launcher_colors.dart';
 import 'm3_spring_button.dart';
+import 'quick_tasks_bar.dart';
 
 typedef SettingsSheet = SettingsPage;
 
@@ -30,6 +32,9 @@ class SettingsPage extends StatefulWidget {
     this.profileName,
     this.profilePhoto,
     this.quickAppCount = 0,
+    this.pinnedQuickTasks = const [],
+    this.allShortcuts = const [],
+    this.onPinnedQuickTasksChanged,
     this.onProfileNameChanged,
     this.onProfilePhotoChanged,
     required this.onSelectCustomAccent,
@@ -68,6 +73,9 @@ class SettingsPage extends StatefulWidget {
   final String? profileName;
   final Uint8List? profilePhoto;
   final int quickAppCount;
+  final List<PinnedQuickTask> pinnedQuickTasks;
+  final List<AppShortcut> allShortcuts;
+  final ValueChanged<List<PinnedQuickTask>>? onPinnedQuickTasksChanged;
   final LauncherPreferences? prefs;
   final LauncherPlatform? platform;
   final VoidCallback? onBackupRestored;
@@ -104,6 +112,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Uint8List? _profilePhoto;
   late final TextEditingController _ambientTextController;
   bool _showCustomSliders = false;
+  late List<PinnedQuickTask> _pinnedTasks;
 
   @override
   void initState() {
@@ -118,6 +127,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _profileNameController = TextEditingController(text: widget.profileName ?? '');
     _profilePhoto = widget.profilePhoto;
     _ambientTextController = TextEditingController(text: widget.ambientCustomText ?? '');
+    _pinnedTasks = List<PinnedQuickTask>.from(widget.pinnedQuickTasks);
   }
 
   @override
@@ -125,6 +135,85 @@ class _SettingsPageState extends State<SettingsPage> {
     _ambientTextController.dispose();
     _profileNameController.dispose();
     super.dispose();
+  }
+
+  Widget _buildQuickTaskSlot(int index) {
+    final task = index < _pinnedTasks.length ? _pinnedTasks[index] : null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => _pickQuickTaskForSlot(index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1F1F1F),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              task != null ? Icons.bolt_rounded : Icons.add_rounded,
+              color: task != null ? _currentAccent : Colors.white54,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                task?.label ?? 'Tap to pin quick task ${index + 1}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: task != null ? Colors.white : Colors.white54,
+                  fontSize: 14,
+                  fontWeight: task != null ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ),
+            if (task != null)
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white54),
+                onPressed: () {
+                  final updated = List<PinnedQuickTask>.from(_pinnedTasks)
+                    ..removeAt(index);
+                  setState(() => _pinnedTasks = updated);
+                  widget.onPinnedQuickTasksChanged?.call(updated);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _pickQuickTaskForSlot(int index) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetCtx) => QuickTaskPickerSheet(
+        shortcuts: widget.allShortcuts,
+        apps: widget.allApps,
+        accent: _currentAccent,
+        pinnedKeys: _pinnedTasks.map((t) => t.key).toSet(),
+        onSelected: (shortcut) {
+          Navigator.pop(sheetCtx);
+          final next = PinnedQuickTask(
+            packageName: shortcut.packageName,
+            shortcutId: shortcut.id,
+            label: shortcut.displayLabel,
+          );
+          final updated = List<PinnedQuickTask>.from(_pinnedTasks);
+          updated.removeWhere((t) => t.key == next.key);
+          if (index < updated.length) {
+            updated[index] = next;
+          } else {
+            updated.add(next);
+          }
+          final capped = updated.take(maxPinnedQuickTasks).toList();
+          setState(() => _pinnedTasks = capped);
+          widget.onPinnedQuickTasksChanged?.call(capped);
+        },
+      ),
+    );
   }
 
   Future<void> _pickProfilePhoto() async {
@@ -772,6 +861,28 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ],
               ),
+
+              // Pinned Quick Tasks (up to 2)
+              if (widget.onPinnedQuickTasksChanged != null) ...[
+                _buildSectionHeader('QUICK TASKS (UP TO 2)'),
+                _buildCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildTileHeader(
+                        icon: Icons.bolt_rounded,
+                        title: 'Pinned Quick Tasks',
+                        subtitle: 'Pin up to 2 app shortcuts (e.g. Scan QR, New Task)',
+                      ),
+                      const SizedBox(height: 12),
+                      for (var i = 0; i < maxPinnedQuickTasks; i++) ...[
+                        if (i > 0) const SizedBox(height: 8),
+                        _buildQuickTaskSlot(i),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
 
               // Drawer Display Mode & Search Options
               _buildSectionHeader('APP DRAWER & SEARCH'),

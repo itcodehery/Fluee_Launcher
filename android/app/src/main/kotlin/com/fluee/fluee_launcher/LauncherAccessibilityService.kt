@@ -32,6 +32,11 @@ class LauncherAccessibilityService : AccessibilityService() {
             return service.performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
         }
 
+        fun openNotifications(): Boolean {
+            val service = instance ?: return false
+            return service.performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+        }
+
         fun lockScreen(): Boolean {
             val service = instance ?: return false
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

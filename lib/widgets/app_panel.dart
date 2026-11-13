@@ -52,6 +52,11 @@ class AppPanel extends StatefulWidget {
     required this.accent,
     this.shortcuts = const [],
     this.onShortcutTap,
+    this.mediaPackageName,
+    this.mediaTitle,
+    this.mediaArtist,
+    this.mediaAlbumArt,
+    this.mediaIsPlaying = true,
     required this.onExpandedChanged,
     required this.onAppTap,
     required this.onAppLongPress,
@@ -74,6 +79,11 @@ class AppPanel extends StatefulWidget {
   final Color accent;
   final List<AppShortcut> shortcuts;
   final ValueChanged<AppShortcut>? onShortcutTap;
+  final String? mediaPackageName;
+  final String? mediaTitle;
+  final String? mediaArtist;
+  final Uint8List? mediaAlbumArt;
+  final bool mediaIsPlaying;
   final ValueChanged<bool> onExpandedChanged;
   final ValueChanged<AppItem> onAppTap;
   final ValueChanged<AppItem> onAppLongPress;
@@ -322,7 +332,81 @@ class _AppPanelState extends State<AppPanel> {
         );
 
       case DrawerMode.grid:
-        return GridView.builder(
+        final hasActiveMedia = widget.mediaPackageName != null &&
+            widget.mediaPackageName!.isNotEmpty &&
+            widget.mediaTitle != null &&
+            widget.mediaTitle!.isNotEmpty &&
+            displayApps.any((a) => a.packageName == widget.mediaPackageName);
+
+        if (!hasActiveMedia) {
+          return GridView.builder(
+            reverse: reverse,
+            controller: _scrollController,
+            padding: EdgeInsets.only(
+              left: TileMetrics.margin,
+              right: TileMetrics.margin,
+              top: 4,
+              bottom: listBottomPadding,
+            ),
+            physics: widget.isExpanded
+                ? const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  )
+                : const NeverScrollableScrollPhysics(),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: TileMetrics.columns,
+              mainAxisSpacing: TileMetrics.gap,
+              crossAxisSpacing: TileMetrics.gap,
+            ),
+            itemCount: displayApps.length,
+            itemBuilder: (context, index) {
+              final app = displayApps[index];
+              return AppTile(
+                key: ValueKey('${app.id}_$index'),
+                app: app,
+                background: widget.isIdle
+                    ? Colors.transparent
+                    : LauncherColors.tileBackground,
+                transparentBackground: widget.isIdle,
+                iconTint: LauncherColors.tileIcon,
+                borderRadius: widget.metrics.borderRadius,
+                onTap: () => widget.onAppTap(app),
+                onLongPress: () => widget.onAppLongPress(app),
+              );
+            },
+          );
+        }
+
+        // Pack grid items into 4-column rows where the playing media app spans 2 columns.
+        final rows = <List<({AppItem app, bool isMedia, int index})>>[];
+        var currentRow = <({AppItem app, bool isMedia, int index})>[];
+        var usedCols = 0;
+        var matchedMediaApp = false;
+        for (var i = 0; i < displayApps.length; i++) {
+          final app = displayApps[i];
+          final isMedia = !matchedMediaApp &&
+              app.packageName == widget.mediaPackageName;
+          if (isMedia) matchedMediaApp = true;
+          final span = isMedia ? 2 : 1;
+          if (usedCols + span > TileMetrics.columns) {
+            rows.add(currentRow);
+            currentRow = [];
+            usedCols = 0;
+          }
+          currentRow.add((app: app, isMedia: isMedia, index: i));
+          usedCols += span;
+          if (usedCols >= TileMetrics.columns) {
+            rows.add(currentRow);
+            currentRow = [];
+            usedCols = 0;
+          }
+        }
+        if (currentRow.isNotEmpty) {
+          rows.add(currentRow);
+        }
+
+        final tileSize = widget.metrics.tileSize;
+        return ListView.builder(
           reverse: reverse,
           controller: _scrollController,
           padding: EdgeInsets.only(
@@ -336,25 +420,58 @@ class _AppPanelState extends State<AppPanel> {
                   parent: AlwaysScrollableScrollPhysics(),
                 )
               : const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: TileMetrics.columns,
-            mainAxisSpacing: TileMetrics.gap,
-            crossAxisSpacing: TileMetrics.gap,
-          ),
-          itemCount: displayApps.length,
-          itemBuilder: (context, index) {
-            final app = displayApps[index];
-            return AppTile(
-              key: ValueKey('${app.id}_$index'),
-              app: app,
-              background: widget.isIdle
-                  ? Colors.transparent
-                  : LauncherColors.tileBackground,
-              transparentBackground: widget.isIdle,
-              iconTint: LauncherColors.tileIcon,
-              borderRadius: widget.metrics.borderRadius,
-              onTap: () => widget.onAppTap(app),
-              onLongPress: () => widget.onAppLongPress(app),
+          itemCount: rows.length,
+          itemBuilder: (context, rowIndex) {
+            final row = rows[rowIndex];
+            final isLast = rowIndex == rows.length - 1;
+            return Padding(
+              padding: EdgeInsets.only(bottom: isLast ? 0 : TileMetrics.gap),
+              child: Row(
+                children: [
+                  for (var col = 0; col < row.length; col++) ...[
+                    if (col > 0) const SizedBox(width: TileMetrics.gap),
+                    if (row[col].isMedia)
+                      SizedBox(
+                        width: tileSize * 2 + TileMetrics.gap,
+                        height: tileSize,
+                        child: MediaAppTile(
+                          key: ValueKey('media_${row[col].app.id}_${row[col].index}'),
+                          app: row[col].app,
+                          tileSize: tileSize,
+                          title: widget.mediaTitle!,
+                          artist: widget.mediaArtist ?? '',
+                          albumArt: widget.mediaAlbumArt,
+                          accent: widget.accent,
+                          isPlaying: widget.mediaIsPlaying,
+                          background: widget.isIdle
+                              ? Colors.transparent
+                              : LauncherColors.tileBackground,
+                          borderRadius: widget.metrics.borderRadius,
+                          transparentBackground: widget.isIdle,
+                          onTap: () => widget.onAppTap(row[col].app),
+                          onLongPress: () => widget.onAppLongPress(row[col].app),
+                        ),
+                      )
+                    else
+                      SizedBox(
+                        width: tileSize,
+                        height: tileSize,
+                        child: AppTile(
+                          key: ValueKey('${row[col].app.id}_${row[col].index}'),
+                          app: row[col].app,
+                          background: widget.isIdle
+                              ? Colors.transparent
+                              : LauncherColors.tileBackground,
+                          transparentBackground: widget.isIdle,
+                          iconTint: LauncherColors.tileIcon,
+                          borderRadius: widget.metrics.borderRadius,
+                          onTap: () => widget.onAppTap(row[col].app),
+                          onLongPress: () => widget.onAppLongPress(row[col].app),
+                        ),
+                      ),
+                  ],
+                ],
+              ),
             );
           },
         );

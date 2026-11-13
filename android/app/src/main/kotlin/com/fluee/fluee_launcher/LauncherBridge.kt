@@ -52,6 +52,11 @@ class LauncherBridge(private val context: Context) :
     // Memory cache for rendered app icon PNG bytes: key is "$pkg/$activityName#$serial@$iconPack"
     private val renderedIconCache = ConcurrentHashMap<String, Pair<ByteArray, Boolean>>()
 
+    // Media artwork cache: avoids re-encoding (and re-sending) unchanged album art every poll.
+    private var artSourceRef: java.lang.ref.WeakReference<Bitmap>? = null
+    private var artSourceBytes: ByteArray = ByteArray(0)
+    private var lastSentArtId: Int = 0
+
     private var pendingExportContent: String? = null
     private var pendingExportResult: MethodChannel.Result? = null
     private var pendingImportResult: MethodChannel.Result? = null
@@ -101,6 +106,126 @@ class LauncherBridge(private val context: Context) :
             }
         }
         return false
+    }
+
+    /**
+     * Reads the currently active media session (preferring a playing/buffering one, then a
+     * paused one so the now-playing tile does not flicker while paused), and falls back to the
+     * media notification captured by [LauncherNotificationListener] when sessions are unavailable.
+     *
+     * Runs on the worker executor; never call from the main thread.
+     */
+    private fun readActiveMediaTrack(): Map<String, Any?>? {
+        val playingStates = listOf(
+            android.media.session.PlaybackState.STATE_PLAYING,
+            android.media.session.PlaybackState.STATE_BUFFERING
+        )
+
+        try {
+            val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
+            if (mediaSessionManager != null) {
+                val comp = ComponentName(context, LauncherNotificationListener::class.java)
+                val controllers = mediaSessionManager.getActiveSessions(comp)
+                val candidates = controllers.filter { ctrl ->
+                    val state = ctrl.playbackState?.state
+                    playingStates.contains(state) ||
+                        state == android.media.session.PlaybackState.STATE_PAUSED
+                }
+                val active = candidates.firstOrNull { playingStates.contains(it.playbackState?.state) }
+                    ?: candidates.firstOrNull()
+
+                if (active != null) {
+                    val metadata = active.metadata
+                    val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+                        ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+                    val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+                        ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                        ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
+
+                    if (!title.isNullOrEmpty()) {
+                        val bitmap = metadata?.getBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART)
+                            ?: metadata?.getBitmap(android.media.MediaMetadata.METADATA_KEY_ART)
+                            ?: metadata?.getBitmap(android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+                        return mediaPayload(
+                            title = title,
+                            artist = artist ?: "",
+                            packageName = active.packageName ?: "",
+                            isPlaying = playingStates.contains(active.playbackState?.state),
+                            artBytes = encodeArt(bitmap)
+                        )
+                    }
+                }
+            }
+        } catch (_: SecurityException) {
+            // Notification Listener permission not granted yet
+        } catch (_: Exception) {
+        }
+
+        // Fallback to active media notifications captured by listener service
+        val fallback = LauncherNotificationListener.latestMediaNotification ?: return null
+        if (fallback.title.isEmpty()) return null
+        return mediaPayload(
+            title = fallback.title,
+            artist = fallback.artist,
+            packageName = fallback.packageName,
+            isPlaying = fallback.isPlaying,
+            artBytes = fallback.artBytes
+        )
+    }
+
+    /** Downscales/compresses album art, reusing the last result while the source bitmap is alive. */
+    private fun encodeArt(source: Bitmap?): ByteArray {
+        if (source == null) return ByteArray(0)
+        if (artSourceRef?.get() === source) return artSourceBytes
+        return try {
+            val scaled = if (source.width > 192 || source.height > 192) {
+                val ratio = minOf(192f / source.width, 192f / source.height)
+                Bitmap.createScaledBitmap(
+                    source,
+                    (source.width * ratio).roundToInt().coerceAtLeast(1),
+                    (source.height * ratio).roundToInt().coerceAtLeast(1),
+                    true
+                )
+            } else {
+                source
+            }
+            val bytes = ByteArrayOutputStream().use { stream ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                stream.toByteArray()
+            }
+            artSourceRef = java.lang.ref.WeakReference(source)
+            artSourceBytes = bytes
+            bytes
+        } catch (_: Exception) {
+            ByteArray(0)
+        }
+    }
+
+    /**
+     * Builds the channel payload for a track. Album art bytes are only included when the artwork
+     * actually changed; Dart keeps the previously decoded image otherwise.
+     */
+    private fun mediaPayload(
+        title: String,
+        artist: String,
+        packageName: String,
+        isPlaying: Boolean,
+        artBytes: ByteArray?
+    ): Map<String, Any?> {
+        val bytes = artBytes ?: ByteArray(0)
+        val artId = if (bytes.isEmpty()) 0 else bytes.contentHashCode()
+        val payload = mutableMapOf<String, Any?>(
+            "title" to title,
+            "artist" to artist,
+            "packageName" to packageName,
+            "isPlaying" to isPlaying,
+            "artId" to artId
+        )
+        if (artId != lastSentArtId) {
+            lastSentArtId = artId
+            payload["albumArt"] = bytes
+        }
+        return payload
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -304,6 +429,20 @@ class LauncherBridge(private val context: Context) :
                 result.success(LauncherAccessibilityService.showPowerMenu())
             }
 
+            "openNotifications" -> {
+                var ok = LauncherAccessibilityService.openNotifications()
+                if (!ok) {
+                    try {
+                        val sbService = context.getSystemService("statusbar")
+                        val statusBarManager = Class.forName("android.app.StatusBarManager")
+                        val method = statusBarManager.getMethod("expandNotificationsPanel")
+                        method.invoke(sbService)
+                        ok = true
+                    } catch (_: Exception) {}
+                }
+                result.success(ok)
+            }
+
             "lockScreen" -> {
                 val locked = LauncherAccessibilityService.lockScreen()
                 result.success(locked)
@@ -317,55 +456,14 @@ class LauncherBridge(private val context: Context) :
             }
 
             "getMediaTrack" -> {
-                try {
-                    val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
-                    if (mediaSessionManager != null) {
-                        val comp = ComponentName(context, LauncherNotificationListener::class.java)
-                        val controllers = mediaSessionManager.getActiveSessions(comp)
-                        val active = controllers.firstOrNull { ctrl ->
-                            val state = ctrl.playbackState?.state
-                            state == android.media.session.PlaybackState.STATE_PLAYING ||
-                            state == android.media.session.PlaybackState.STATE_BUFFERING
-                        } ?: controllers.firstOrNull()
-
-                        if (active != null) {
-                            val metadata = active.metadata
-                            val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
-                                ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-                            val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
-                                ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
-                                ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
-
-                            if (!title.isNullOrEmpty()) {
-                                result.success(
-                                    mapOf(
-                                        "title" to title,
-                                        "artist" to (artist ?: ""),
-                                        "isPlaying" to (active.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING)
-                                    )
-                                )
-                                return
-                            }
-                        }
+                worker.execute {
+                    val track = try {
+                        readActiveMediaTrack()
+                    } catch (_: Exception) {
+                        null
                     }
-                } catch (_: SecurityException) {
-                    // Notification Listener permission not granted yet
-                } catch (_: Exception) {}
-
-                // Fallback to active media notifications captured by listener service
-                val fallback = LauncherNotificationListener.latestMediaNotification
-                if (fallback != null && fallback.title.isNotEmpty()) {
-                    result.success(
-                        mapOf(
-                            "title" to fallback.title,
-                            "artist" to fallback.artist,
-                            "isPlaying" to fallback.isPlaying
-                        )
-                    )
-                    return
+                    mainHandler.post { result.success(track) }
                 }
-
-                result.success(null)
             }
 
             "openNotificationListenerSettings" -> {

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/app_shortcut.dart';
 import '../theme/launcher_colors.dart';
 
 enum DrawerMode {
@@ -22,6 +23,7 @@ class LauncherPreferences {
   final SharedPreferences _prefs;
 
   static const _keyQuickApps = 'quick_app_ids';
+  static const _keyPinnedQuickTasks = 'pinned_quick_tasks';
   static const _keyRecentApps = 'recent_app_ids';
   static const _keySortMode = 'drawer_sort_mode';
   static const _keyWallpaperAccent = 'accent_wallpaper';
@@ -56,6 +58,28 @@ class LauncherPreferences {
 
   Future<void> setQuickAppIds(List<String> ids) =>
       _prefs.setStringList(_keyQuickApps, ids);
+
+  List<PinnedQuickTask> get pinnedQuickTasks {
+    final raw = _prefs.getString(_keyPinnedQuickTasks);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(PinnedQuickTask.fromJson)
+          .where((t) => t.packageName.isNotEmpty && t.shortcutId.isNotEmpty)
+          .take(maxPinnedQuickTasks)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> setPinnedQuickTasks(List<PinnedQuickTask> tasks) async {
+    final capped = tasks.take(maxPinnedQuickTasks).map((t) => t.toJson()).toList();
+    await _prefs.setString(_keyPinnedQuickTasks, jsonEncode(capped));
+  }
 
   List<String> get recentAppIds =>
       _prefs.getStringList(_keyRecentApps) ?? const [];
@@ -257,6 +281,7 @@ class LauncherPreferences {
       'version': 1,
       'exportDate': DateTime.now().toIso8601String(),
       'quickAppIds': quickAppIds,
+      'pinnedQuickTasks': pinnedQuickTasks.map((t) => t.toJson()).toList(),
       'recentAppIds': recentAppIds,
       'sortMode': sortMode.name,
       'hiddenAppIds': hiddenAppIds.toList(),
@@ -289,6 +314,16 @@ class LauncherPreferences {
       if (data.containsKey('quickAppIds')) {
         final list = (data['quickAppIds'] as List?)?.map((e) => e.toString()).toList() ?? [];
         await setQuickAppIds(list);
+      }
+      if (data.containsKey('pinnedQuickTasks')) {
+        final rawList = data['pinnedQuickTasks'] as List? ?? const [];
+        final tasks = rawList
+            .whereType<Map<String, dynamic>>()
+            .map(PinnedQuickTask.fromJson)
+            .where((t) => t.packageName.isNotEmpty && t.shortcutId.isNotEmpty)
+            .take(maxPinnedQuickTasks)
+            .toList();
+        await setPinnedQuickTasks(tasks);
       }
       if (data.containsKey('hiddenAppIds')) {
         final list = (data['hiddenAppIds'] as List?)?.map((e) => e.toString()).toSet() ?? {};

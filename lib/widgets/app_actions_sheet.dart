@@ -21,6 +21,8 @@ class AppActionsSheet extends StatefulWidget {
     required this.onAppInfo,
     required this.onUninstall,
     this.onShortcutTap,
+    this.pinnedTaskKeys = const {},
+    this.onTogglePinShortcut,
   });
 
   final AppItem app;
@@ -35,6 +37,8 @@ class AppActionsSheet extends StatefulWidget {
   final VoidCallback onAppInfo;
   final VoidCallback onUninstall;
   final void Function(AppShortcut shortcut)? onShortcutTap;
+  final Set<String> pinnedTaskKeys;
+  final ValueChanged<AppShortcut>? onTogglePinShortcut;
 
   @override
   State<AppActionsSheet> createState() => _AppActionsSheetState();
@@ -165,53 +169,76 @@ class _AppActionsSheetState extends State<AppActionsSheet> {
                   child: Column(
                     children: [
                       for (final s in _shortcuts)
-                        InkWell(
-                          borderRadius: BorderRadius.circular(14),
-                          onTap: () {
-                            Navigator.pop(context);
-                            if (widget.onShortcutTap != null) {
-                              widget.onShortcutTap!(s);
-                            } else {
-                              widget.platform.startShortcut(s.packageName, s.id);
-                            }
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 34,
-                                  height: 34,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF262C29),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: s.icon.isNotEmpty
-                                      ? Image.memory(s.icon, width: 22, height: 22)
-                                      : Icon(Icons.bolt_rounded, size: 20, color: widget.accent),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    s.displayLabel,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14.5,
-                                      fontWeight: FontWeight.w600,
+                        Builder(
+                          builder: (context) {
+                            final isPinned = widget.pinnedTaskKeys
+                                .contains('${s.packageName}/${s.id}');
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (widget.onShortcutTap != null) {
+                                  widget.onShortcutTap!(s);
+                                } else {
+                                  widget.platform.startShortcut(s.packageName, s.id);
+                                }
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 34,
+                                      height: 34,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF262C29),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: s.icon.isNotEmpty
+                                          ? Image.memory(s.icon, width: 22, height: 22)
+                                          : Icon(Icons.bolt_rounded, size: 20, color: widget.accent),
                                     ),
-                                  ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        s.displayLabel,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    if (widget.onTogglePinShortcut != null)
+                                      IconButton(
+                                        tooltip: isPinned ? 'Unpin quick task' : 'Pin quick task',
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () {
+                                          Navigator.pop(context);
+                                          widget.onTogglePinShortcut!(s);
+                                        },
+                                        icon: Icon(
+                                          isPinned
+                                              ? Icons.push_pin_rounded
+                                              : Icons.push_pin_outlined,
+                                          size: 18,
+                                          color: isPinned ? widget.accent : Colors.white54,
+                                        ),
+                                      )
+                                    else
+                                      const Icon(
+                                        Icons.north_east_rounded,
+                                        size: 15,
+                                        color: Colors.white38,
+                                      ),
+                                  ],
                                 ),
-                                const Icon(
-                                  Icons.north_east_rounded,
-                                  size: 15,
-                                  color: Colors.white38,
-                                ),
-                              ],
-                            ),
-                          ),
+                              ),
+                            );
+                          },
                         ),
                     ],
                   ),

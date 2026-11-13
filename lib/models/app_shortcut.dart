@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+const int maxPinnedQuickTasks = 2;
+
 class AppShortcut {
   const AppShortcut({
     required this.id,
@@ -37,6 +39,34 @@ class AppShortcut {
       shortLabel: map['shortLabel'] as String? ?? '',
       longLabel: map['longLabel'] as String?,
       icon: iconBytes,
+    );
+  }
+}
+
+class PinnedQuickTask {
+  const PinnedQuickTask({
+    required this.packageName,
+    required this.shortcutId,
+    required this.label,
+  });
+
+  final String packageName;
+  final String shortcutId;
+  final String label;
+
+  String get key => '$packageName/$shortcutId';
+
+  Map<String, dynamic> toJson() => {
+        'packageName': packageName,
+        'shortcutId': shortcutId,
+        'label': label,
+      };
+
+  factory PinnedQuickTask.fromJson(Map<String, dynamic> json) {
+    return PinnedQuickTask(
+      packageName: json['packageName'] as String? ?? '',
+      shortcutId: json['shortcutId'] as String? ?? '',
+      label: json['label'] as String? ?? '',
     );
   }
 }

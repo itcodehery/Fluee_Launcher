@@ -212,6 +212,15 @@ class LauncherPlatform {
     }
   }
 
+  /// Opens the system notification shade; false if unavailable.
+  Future<bool> openNotifications() async {
+    try {
+      return await _method.invokeMethod<bool>('openNotifications') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> lockScreen() async {
     try {
       final res = await _method.invokeMethod<bool>('lockScreen');

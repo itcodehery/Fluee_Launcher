@@ -8,10 +8,13 @@ import 'package:fluee_launcher/models/app_item.dart';
 import 'package:fluee_launcher/models/app_shortcut.dart';
 import 'package:fluee_launcher/services/launcher_platform.dart';
 import 'package:fluee_launcher/services/launcher_preferences.dart';
+import 'package:fluee_launcher/theme/app_shapes.dart';
 import 'package:fluee_launcher/widgets/app_panel.dart';
 import 'package:fluee_launcher/widgets/app_tile.dart';
 import 'package:fluee_launcher/widgets/launcher_clock.dart';
+import 'package:fluee_launcher/widgets/profile_dashboard.dart';
 import 'package:fluee_launcher/widgets/quick_apps_panel.dart';
+import 'package:fluee_launcher/widgets/quick_tasks_bar.dart';
 
 void main() {
   testWidgets('Launcher renders home screen', (WidgetTester tester) async {
@@ -19,11 +22,11 @@ void main() {
     expect(find.byType(LauncherScreen), findsOneWidget);
   });
 
-  testWidgets('LauncherClock renders Pixel Watch stadium clock and weather complication',
+  testWidgets('LauncherClock renders Pixel Watch stadium clock and battery complication',
       (WidgetTester tester) async {
     bool clockTapped = false;
     bool dateTapped = false;
-    bool weatherTapped = false;
+    bool batteryTapped = false;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -31,31 +34,33 @@ void main() {
           body: LauncherClock(
             accent: Colors.teal,
             leadingValue: '12 Dec',
+            batteryLevel: 49,
+            isCharging: false,
             onTap: () => clockTapped = true,
             onDateTap: () => dateTapped = true,
             onSettingsTap: () {},
-            onWeatherTap: () => weatherTapped = true,
+            onBatteryTap: () => batteryTapped = true,
           ),
         ),
       ),
     );
 
-    // Verify leading date complication (day and month stacked, e.g. "12" and "Dec")
+    // Verify trailing date complication (day and month stacked, e.g. "12" and "Dec")
     expect(find.text('12'), findsOneWidget);
     expect(find.text('Dec'), findsOneWidget);
     await tester.tap(find.text('12'));
     expect(dateTapped, true);
 
-    // Verify trailing weather complication
-    expect(find.byType(WeatherCircleComplication), findsOneWidget);
-    expect(find.text('32'), findsOneWidget);
-    expect(find.byIcon(Icons.wb_cloudy_rounded), findsOneWidget);
+    // Verify leading battery complication
+    expect(find.byType(BatteryCircleComplication), findsOneWidget);
+    expect(find.text('49%'), findsOneWidget);
+    expect(find.byIcon(Icons.battery_full_rounded), findsOneWidget);
 
-    await tester.tap(find.text('32'));
-    expect(weatherTapped, true);
+    await tester.tap(find.text('49%'));
+    expect(batteryTapped, true);
 
     await tester.tap(find.byType(LauncherClock));
-    expect(clockTapped || weatherTapped, true);
+    expect(clockTapped || batteryTapped, true);
   });
 
   testWidgets('QuickAppsPanel renders battery pill, 6 slots and status pill',
@@ -308,5 +313,368 @@ void main() {
     expect(freshPrefs.hiddenAppIds, {'hidden1'});
     expect(freshPrefs.customLabelMap, {'app1': 'Custom App 1'});
     expect(freshPrefs.customAccent.toARGB32(), const Color(0xFF123456).toARGB32());
+  });
+
+  test('AppIconShape deterministically assigns varied Material shapes', () {
+    final shapes = {
+      appShapeForId('com.google.android.youtube/Main'),
+      appShapeForId('com.google.android.dialer/Main'),
+      appShapeForId('com.google.android.apps.photos/Main'),
+      appShapeForId('com.android.chrome/Main'),
+      appShapeForId('com.google.android.apps.tasks/Main'),
+      appShapeForId('com.google.android.apps.nbu.paisa.user/Main'),
+      appShapeForId('com.spotify.music/Main'),
+      appShapeForId('com.whatsapp/Main'),
+    };
+    expect(shapes.length, greaterThan(1));
+    expect(
+      appShapeForId('com.android.chrome/Main'),
+      appShapeForId('com.android.chrome/Main'),
+    );
+  });
+
+  test('LauncherPreferences persists up to 2 pinned quick tasks', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await LauncherPreferences.load();
+
+    await prefs.setPinnedQuickTasks([
+      const PinnedQuickTask(
+        packageName: 'com.google.android.apps.tasks',
+        shortcutId: 'new_task',
+        label: 'New Task',
+      ),
+      const PinnedQuickTask(
+        packageName: 'com.google.android.apps.nbu.paisa.user',
+        shortcutId: 'scan_qr',
+        label: 'Scan QR',
+      ),
+      const PinnedQuickTask(
+        packageName: 'com.android.chrome',
+        shortcutId: 'new_tab',
+        label: 'New Tab',
+      ),
+    ]);
+
+    expect(prefs.pinnedQuickTasks.length, 2);
+    expect(prefs.pinnedQuickTasks[0].label, 'New Task');
+    expect(prefs.pinnedQuickTasks[1].label, 'Scan QR');
+
+    final exported = prefs.exportBackupJson();
+    SharedPreferences.setMockInitialValues({});
+    final restored = await LauncherPreferences.load();
+    expect(await restored.importBackupJson(jsonEncode(exported)), true);
+    expect(restored.pinnedQuickTasks.length, 2);
+    expect(restored.pinnedQuickTasks[1].shortcutId, 'scan_qr');
+  });
+
+  testWidgets('QuickTasksBar renders up to 2 pinned tasks and handles taps',
+      (WidgetTester tester) async {
+    PinnedQuickTask? tappedTask;
+    int? longPressedIndex;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuickTasksBar(
+            tasks: const [
+              PinnedQuickTask(
+                packageName: 'com.google.android.apps.tasks',
+                shortcutId: 'new_task',
+                label: 'New Task',
+              ),
+              PinnedQuickTask(
+                packageName: 'com.google.android.apps.nbu.paisa.user',
+                shortcutId: 'scan_qr',
+                label: 'Scan QR',
+              ),
+            ],
+            shortcuts: const [],
+            accent: Colors.teal,
+            onTaskTap: (t) => tappedTask = t,
+            onTaskLongPress: (i, _) => longPressedIndex = i,
+            onAddTap: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('New Task'), findsOneWidget);
+    expect(find.text('Scan QR'), findsOneWidget);
+
+    await tester.tap(find.text('Scan QR'));
+    expect(tappedTask?.shortcutId, 'scan_qr');
+
+    await tester.longPress(find.text('New Task'));
+    expect(longPressedIndex, 0);
+  });
+
+  testWidgets('AppPanel expands playing media app to 2 columns with title and artist',
+      (WidgetTester tester) async {
+    final apps = [
+      AppItem(
+        label: 'Calendar',
+        packageName: 'com.google.android.calendar',
+        activityName: 'Main',
+        userSerial: 0,
+        icon: Uint8List(0),
+        isMonochrome: false,
+      ),
+      AppItem(
+        label: 'Spotify',
+        packageName: 'com.spotify.music',
+        activityName: 'Main',
+        userSerial: 0,
+        icon: Uint8List(0),
+        isMonochrome: false,
+      ),
+      AppItem(
+        label: 'Arc',
+        packageName: 'company.thebrowser.arc',
+        activityName: 'Main',
+        userSerial: 0,
+        icon: Uint8List(0),
+        isMonochrome: false,
+      ),
+    ];
+
+    AppItem? tappedApp;
+    final metrics = TileMetrics.forWidth(400);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppPanel(
+            apps: apps,
+            metrics: metrics,
+            dockHeight: 80,
+            isExpanded: false,
+            accent: Colors.teal,
+            mediaPackageName: 'com.spotify.music',
+            mediaTitle: 'Loyal',
+            mediaArtist: 'ODESZA',
+            onExpandedChanged: (_) {},
+            onAppTap: (a) => tappedApp = a,
+            onAppLongPress: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(MediaAppTile), findsOneWidget);
+    expect(find.text('Loyal'), findsOneWidget);
+    expect(find.text('ODESZA'), findsOneWidget);
+
+    final mediaBox = tester.getSize(find.byType(MediaAppTile));
+    expect(mediaBox.width, closeTo(metrics.tileSize * 2 + TileMetrics.gap, 0.01));
+
+    await tester.tap(find.byType(MediaAppTile));
+    expect(tappedApp?.packageName, 'com.spotify.music');
+  });
+
+  testWidgets('Expanded dashboard hides the clock and only the chevron collapses it',
+      (WidgetTester tester) async {
+    final controller = LauncherClockController();
+    var chevronTaps = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: LauncherClock(
+              accent: Colors.teal,
+              batteryLevel: 56,
+              controller: controller,
+              onTap: () {},
+              onSettingsTap: () {},
+              dashboard: ProfileDashboard(
+                accent: Colors.teal,
+                platform: LauncherPlatform(),
+                name: 'Hari',
+                onCollapse: () {
+                  chevronTaps++;
+                  controller.collapse();
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.textContaining(':'));
+    await tester.pumpAndSettle();
+
+    expect(controller.isExpanded, isTrue);
+    // Clock text is removed from the expanded card.
+    expect(find.textContaining(':'), findsNothing);
+    expect(find.text('Hey Hari,'), findsOneWidget);
+
+    // Tapping the dashboard body must not collapse it.
+    await tester.tap(find.text('Hey Hari,'));
+    await tester.pumpAndSettle();
+    expect(controller.isExpanded, isTrue);
+    expect(chevronTaps, 0);
+
+    // The chevron inside the dashboard is the only collapse affordance.
+    await tester.tap(find.byIcon(Icons.keyboard_arrow_up_rounded));
+    await tester.pumpAndSettle();
+    expect(chevronTaps, 1);
+    expect(controller.isExpanded, isFalse);
+    expect(find.textContaining(':'), findsOneWidget);
+  });
+
+  testWidgets('Expanded dashboard never overflows narrow screens',
+      (WidgetTester tester) async {
+    for (final width in [320.0, 360.0, 412.0, 432.0]) {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topCenter,
+              child: LauncherClock(
+                key: ValueKey(width),
+                accent: Colors.teal,
+                batteryLevel: 56,
+                onTap: () {},
+                onSettingsTap: () {},
+                dashboard: ProfileDashboard(
+                  accent: Colors.teal,
+                  platform: LauncherPlatform(),
+                  name: 'Hari',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.textContaining(':'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull,
+          reason: 'clock overflowed at width $width');
+      expect(tester.getSize(find.byType(LauncherClock)).width,
+          lessThanOrEqualTo(width));
+    }
+  });
+
+  testWidgets('Dashboard expands and collapses with a spring animation',
+      (WidgetTester tester) async {
+    final controller = LauncherClockController();
+    tester.view.physicalSize = const Size(432, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topCenter,
+            child: LauncherClock(
+              accent: Colors.teal,
+              batteryLevel: 56,
+              controller: controller,
+              onTap: () {},
+              onSettingsTap: () {},
+              dashboard: ProfileDashboard(
+                accent: Colors.teal,
+                platform: LauncherPlatform(),
+                name: 'Hari',
+                onCollapse: controller.collapse,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final collapsed = tester.getSize(find.byType(LauncherClock));
+
+    await tester.tap(find.textContaining(':'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    final midExpand = tester.getSize(find.byType(LauncherClock));
+    await tester.pump(const Duration(milliseconds: 80));
+    final overshoot = tester.getSize(find.byType(LauncherClock));
+    await tester.pumpAndSettle();
+    final expanded = tester.getSize(find.byType(LauncherClock));
+
+    expect(midExpand.height, greaterThan(collapsed.height));
+    expect(midExpand.height, lessThan(expanded.height));
+    // Under-damped M3 spring overshoots the target while opening.
+    expect(overshoot.height, greaterThan(expanded.height));
+
+    controller.collapse();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    final midCollapse = tester.getSize(find.byType(LauncherClock));
+    await tester.pumpAndSettle();
+    final collapsedAgain = tester.getSize(find.byType(LauncherClock));
+
+    // Collapse must animate too (previously the card snapped shut).
+    expect(midCollapse.height, lessThan(expanded.height));
+    expect(midCollapse.height, greaterThan(collapsedAgain.height));
+    expect(collapsedAgain.height, collapsed.height);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Media tile wraps to the next row when it would not fit',
+      (WidgetTester tester) async {
+    AppItem app(String label, String pkg) => AppItem(
+          label: label,
+          packageName: pkg,
+          activityName: 'Main',
+          userSerial: 0,
+          icon: Uint8List(0),
+          isMonochrome: false,
+        );
+
+    final apps = [
+      app('Calendar', 'com.google.android.calendar'),
+      app('Camera', 'com.google.android.camera'),
+      app('Chrome', 'com.android.chrome'),
+      app('Spotify', 'com.spotify.music'),
+      app('Arc', 'company.thebrowser.arc'),
+    ];
+
+    AppItem? tapped;
+    final metrics = TileMetrics.forWidth(400);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppPanel(
+            apps: apps,
+            metrics: metrics,
+            dockHeight: 80,
+            isExpanded: true,
+            accent: Colors.teal,
+            mediaPackageName: 'com.spotify.music',
+            mediaTitle: 'Loyal',
+            mediaArtist: 'ODESZA',
+            mediaIsPlaying: false,
+            onExpandedChanged: (_) {},
+            onAppTap: (a) => tapped = a,
+            onAppLongPress: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    // Media app sits at index 3, so the 2-column tile is pushed to the next row without
+    // overflowing the panel.
+    expect(tester.takeException(), isNull);
+    expect(find.byType(MediaAppTile), findsOneWidget);
+    expect(tester.getSize(find.byType(MediaAppTile)).width,
+        closeTo(metrics.tileSize * 2 + TileMetrics.gap, 0.01));
+    // Paused playback is indicated instead of the playing waveform.
+    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+
+    await tester.tap(find.byType(MediaAppTile));
+    expect(tapped?.packageName, 'com.spotify.music');
   });
 }
