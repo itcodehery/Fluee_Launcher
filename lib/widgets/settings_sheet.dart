@@ -7,6 +7,7 @@ import '../models/app_shortcut.dart';
 import '../services/launcher_platform.dart';
 import '../services/launcher_preferences.dart';
 import '../theme/launcher_colors.dart';
+import '../theme/m3_motion.dart';
 import 'm3_spring_button.dart';
 import 'quick_tasks_bar.dart';
 
@@ -28,6 +29,10 @@ class SettingsPage extends StatefulWidget {
     required this.autoFocusSearch,
     this.searchIncludesHidden = false,
     this.ambientIdleMode = true,
+    this.ambientTimeoutSeconds = 15,
+    this.ambientStyle = AmbientStyle.pillsGlow,
+    this.ambientLockEnabled = false,
+    this.ambientLockPin,
     this.ambientCustomText,
     this.profileName,
     this.profilePhoto,
@@ -47,12 +52,15 @@ class SettingsPage extends StatefulWidget {
     required this.onToggleAutoFocusSearch,
     this.onToggleSearchIncludesHidden,
     this.onToggleAmbientIdleMode,
+    this.onAmbientTimeoutChanged,
+    this.onAmbientStyleChanged,
+    this.onToggleAmbientLock,
+    this.onAmbientLockPinChanged,
     this.onAmbientCustomTextChanged,
     this.prefs,
     this.platform,
     this.onBackupRestored,
     required this.onOpenHomeSettings,
-    required this.onOpenAccessibilitySettings,
     this.onOpenNotificationListenerSettings,
   });
 
@@ -69,6 +77,10 @@ class SettingsPage extends StatefulWidget {
   final bool autoFocusSearch;
   final bool searchIncludesHidden;
   final bool ambientIdleMode;
+  final int ambientTimeoutSeconds;
+  final AmbientStyle ambientStyle;
+  final bool ambientLockEnabled;
+  final String? ambientLockPin;
   final String? ambientCustomText;
   final String? profileName;
   final Uint8List? profilePhoto;
@@ -91,9 +103,12 @@ class SettingsPage extends StatefulWidget {
   final ValueChanged<bool> onToggleAutoFocusSearch;
   final ValueChanged<bool>? onToggleSearchIncludesHidden;
   final ValueChanged<bool>? onToggleAmbientIdleMode;
+  final ValueChanged<int>? onAmbientTimeoutChanged;
+  final ValueChanged<AmbientStyle>? onAmbientStyleChanged;
+  final ValueChanged<bool>? onToggleAmbientLock;
+  final ValueChanged<String?>? onAmbientLockPinChanged;
   final ValueChanged<String?>? onAmbientCustomTextChanged;
   final VoidCallback onOpenHomeSettings;
-  final VoidCallback onOpenAccessibilitySettings;
   final VoidCallback? onOpenNotificationListenerSettings;
 
   @override
@@ -108,6 +123,10 @@ class _SettingsPageState extends State<SettingsPage> {
   late bool _autoFocus;
   late bool _searchIncludesHidden;
   late bool _ambientIdle;
+  late int _ambientTimeoutSeconds;
+  late AmbientStyle _ambientStyle;
+  late bool _ambientLockEnabled;
+  String? _ambientLockPin;
   late final TextEditingController _profileNameController;
   Uint8List? _profilePhoto;
   late final TextEditingController _ambientTextController;
@@ -124,6 +143,10 @@ class _SettingsPageState extends State<SettingsPage> {
     _autoFocus = widget.autoFocusSearch;
     _searchIncludesHidden = widget.searchIncludesHidden;
     _ambientIdle = widget.ambientIdleMode;
+    _ambientTimeoutSeconds = widget.ambientTimeoutSeconds;
+    _ambientStyle = widget.ambientStyle;
+    _ambientLockEnabled = widget.ambientLockEnabled;
+    _ambientLockPin = widget.ambientLockPin;
     _profileNameController = TextEditingController(text: widget.profileName ?? '');
     _profilePhoto = widget.profilePhoto;
     _ambientTextController = TextEditingController(text: widget.ambientCustomText ?? '');
@@ -252,8 +275,16 @@ class _SettingsPageState extends State<SettingsPage> {
     if (oldWidget.searchIncludesHidden != widget.searchIncludesHidden) {
       _searchIncludesHidden = widget.searchIncludesHidden;
     }
-    if (oldWidget.ambientIdleMode != widget.ambientIdleMode) {
+    if (oldWidget.ambientIdleMode != widget.ambientIdleMode ||
+        oldWidget.ambientTimeoutSeconds != widget.ambientTimeoutSeconds ||
+        oldWidget.ambientStyle != widget.ambientStyle ||
+        oldWidget.ambientLockEnabled != widget.ambientLockEnabled ||
+        oldWidget.ambientLockPin != widget.ambientLockPin) {
       _ambientIdle = widget.ambientIdleMode;
+      _ambientTimeoutSeconds = widget.ambientTimeoutSeconds;
+      _ambientStyle = widget.ambientStyle;
+      _ambientLockEnabled = widget.ambientLockEnabled;
+      _ambientLockPin = widget.ambientLockPin;
     }
     if (oldWidget.profileName != widget.profileName) {
       _profileNameController.text = widget.profileName ?? '';
@@ -490,6 +521,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _autoFocus = widget.prefs!.autoFocusSearch;
         _searchIncludesHidden = widget.prefs!.searchIncludesHidden;
         _ambientIdle = widget.prefs!.ambientIdleMode;
+        _ambientTimeoutSeconds = widget.prefs!.ambientTimeoutSeconds;
         _profileNameController.text = widget.prefs!.profileName ?? '';
         _profilePhoto = widget.prefs!.profilePhoto;
         _ambientTextController.text = widget.prefs!.ambientCustomText ?? '';
@@ -502,114 +534,6 @@ class _SettingsPageState extends State<SettingsPage> {
         const SnackBar(content: Text('Invalid backup file or format.')),
       );
     }
-  }
-
-  void _showAccessibilityDisclosure() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF1B1F1D),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF242A27),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.accessibility_new_rounded, color: _currentAccent, size: 22),
-                  ),
-                  const SizedBox(width: 14),
-                  const Expanded(
-                    child: Text(
-                      'Accessibility Service Disclosure',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Fluee Launcher requests Accessibility Service access solely to enable the double-tap to lock screen gesture and open the power menu.\n\n'
-                '• Fluee Launcher does not monitor your keystrokes or inputs.\n'
-                '• Fluee Launcher does not read screen content or personal activity.\n'
-                '• No user data is ever tracked, stored, or transmitted.',
-                style: TextStyle(
-                  color: Color(0xFFB0BCB6),
-                  fontSize: 13.5,
-                  height: 1.45,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: M3SpringButton(
-                      onTap: () => Navigator.pop(ctx),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF242A27),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        alignment: Alignment.center,
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: M3SpringButton(
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        widget.onOpenAccessibilitySettings();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          color: _currentAccent,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          'Proceed to Settings',
-                          style: TextStyle(
-                            color: LauncherColors.readableOn(_currentAccent),
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   void _showPrivacyPolicy() {
@@ -657,11 +581,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   'Fluee Launcher is a 100% offline, local-only application. We do not collect, transmit, store, or share any personal information. The app does not request or use internet access.\n\n'
                   '2. Local App Discovery (QUERY_ALL_PACKAGES)\n'
                   'Fluee Launcher queries installed apps solely to display your app drawer and search results locally on your device.\n\n'
-                  '3. Accessibility Service Usage\n'
-                  'The Accessibility Service is used solely to lock the screen upon double-tap and display the power menu. It does not monitor keystrokes or inspect window contents.\n\n'
-                  '4. Media Playback\n'
+                  '3. Media Playback\n'
                   'Notification listener access is used strictly to read the active track title and artist for home screen display.\n\n'
-                  '5. Local Backups\n'
+                  '4. Local Backups\n'
                   'All launcher layouts and preferences are stored locally on your device and exported only when requested by you via Android Storage Access Framework.',
                   style: TextStyle(
                     color: Color(0xFFB0BCB6),
@@ -671,6 +593,115 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAmbientPinDialog() {
+    final controller = TextEditingController(text: _ambientLockPin ?? '');
+    showDialog<void>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1F1D),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Set Ambient PIN',
+          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          obscureText: true,
+          maxLength: 8,
+          style: const TextStyle(color: Colors.white, fontSize: 18, letterSpacing: 4),
+          cursorColor: _currentAccent,
+          decoration: InputDecoration(
+            hintText: '4-8 digits',
+            hintStyle: const TextStyle(color: Colors.white38, letterSpacing: 0),
+            counterStyle: const TextStyle(color: Colors.white38),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: _currentAccent.withValues(alpha: 0.5)),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: _currentAccent, width: 2),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+          ),
+          TextButton(
+            onPressed: () {
+              final pin = controller.text.replaceAll(RegExp(r'[^0-9]'), '');
+              Navigator.pop(dlgCtx);
+              if (pin.length >= 4) {
+                setState(() {
+                  _ambientLockPin = pin;
+                  _ambientLockEnabled = true;
+                });
+                widget.onAmbientLockPinChanged?.call(pin);
+                widget.onToggleAmbientLock?.call(true);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('PIN must be at least 4 digits')),
+                );
+              }
+            },
+            child: Text(
+              'Save',
+              style: TextStyle(color: _currentAccent, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAmbientStyleChip(AmbientStyle style, String label, IconData icon) {
+    final selected = _ambientStyle == style;
+    return Expanded(
+      child: M3SpringButton(
+        onTap: () {
+          setState(() => _ambientStyle = style);
+          widget.onAmbientStyleChanged?.call(style);
+        },
+        pressedScale: 0.95,
+        child: AnimatedContainer(
+          duration: M3Motion.fastEffects.duration,
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          decoration: BoxDecoration(
+            color: selected
+                ? _currentAccent.withValues(alpha: 0.18)
+                : const Color(0xFF242A27),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? _currentAccent : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: selected ? _currentAccent : Colors.white70,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? _currentAccent : Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1220,7 +1251,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     _buildTileHeader(
                       icon: Icons.nightlight_round_outlined,
                       title: 'Ambient Idle Screen',
-                      subtitle: 'Dim screen and expand clock after 8s idle',
+                      subtitle: 'Dim screen and enter ambient mode after ${_ambientTimeoutSeconds}s',
                       trailing: _expressiveSwitch(
                         value: _ambientIdle,
                         onChanged: (val) {
@@ -1231,6 +1262,109 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     if (_ambientIdle) ...[
                       const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          for (final option in const [
+                            (8, '8s'),
+                            (15, '15s'),
+                            (30, '30s'),
+                            (60, '1m'),
+                            (120, '2m'),
+                          ]) ...[
+                            if (option.$1 != 8) const SizedBox(width: 6),
+                            Expanded(
+                              child: M3SpringButton(
+                                onTap: () {
+                                  setState(() => _ambientTimeoutSeconds = option.$1);
+                                  widget.onAmbientTimeoutChanged?.call(option.$1);
+                                },
+                                pressedScale: 0.94,
+                                child: AnimatedContainer(
+                                  duration: M3Motion.fastEffects.duration,
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: _ambientTimeoutSeconds == option.$1
+                                        ? _currentAccent.withValues(alpha: 0.18)
+                                        : const Color(0xFF242A27),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: _ambientTimeoutSeconds == option.$1
+                                          ? _currentAccent
+                                          : Colors.transparent,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    option.$2,
+                                    style: TextStyle(
+                                      color: _ambientTimeoutSeconds == option.$1
+                                          ? _currentAccent
+                                          : Colors.white70,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          _buildAmbientStyleChip(
+                            AmbientStyle.pillsGlow,
+                            'Three Pills',
+                            Icons.view_column_rounded,
+                          ),
+                          const SizedBox(width: 10),
+                          _buildAmbientStyleChip(
+                            AmbientStyle.bigClock,
+                            'Big Clock',
+                            Icons.access_time_rounded,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      _buildTileHeader(
+                        icon: Icons.lock_outline_rounded,
+                        title: 'Ambient Lock',
+                        subtitle: _ambientLockPin != null && _ambientLockPin!.isNotEmpty
+                            ? 'Require PIN to unlock ambient screen'
+                            : 'Tap Set PIN to configure keypad lock',
+                        trailing: _expressiveSwitch(
+                          value: _ambientLockEnabled,
+                          onChanged: (val) {
+                            if (val &&
+                                (_ambientLockPin == null || _ambientLockPin!.isEmpty)) {
+                              _showAmbientPinDialog();
+                              return;
+                            }
+                            setState(() => _ambientLockEnabled = val);
+                            widget.onToggleAmbientLock?.call(val);
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: _showAmbientPinDialog,
+                          icon: Icon(Icons.dialpad_rounded, size: 16, color: _currentAccent),
+                          label: Text(
+                            _ambientLockPin != null && _ambientLockPin!.isNotEmpty
+                                ? 'Change PIN'
+                                : 'Set PIN',
+                            style: TextStyle(
+                              color: _currentAccent,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       TextField(
                         controller: _ambientTextController,
                         style: const TextStyle(
@@ -1421,22 +1555,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
               // System Shortcuts Section
               _buildSectionHeader('SYSTEM SHORTCUTS'),
-
-              M3SpringButton(
-                onTap: _showAccessibilityDisclosure,
-                child: _buildCard(
-                  child: _buildTileHeader(
-                    icon: Icons.touch_app_outlined,
-                    title: 'Double-Tap to Lock Setup',
-                    subtitle: 'Enable Fluee Accessibility Service',
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      color: Colors.white38,
-                      size: 14,
-                    ),
-                  ),
-                ),
-              ),
 
               M3SpringButton(
                 onTap: widget.onOpenNotificationListenerSettings ?? () {},

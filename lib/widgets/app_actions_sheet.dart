@@ -46,6 +46,7 @@ class AppActionsSheet extends StatefulWidget {
 
 class _AppActionsSheetState extends State<AppActionsSheet> {
   List<AppShortcut> _shortcuts = const [];
+  bool _loadingShortcuts = true;
 
   @override
   void initState() {
@@ -56,7 +57,10 @@ class _AppActionsSheetState extends State<AppActionsSheet> {
   Future<void> _loadShortcuts() async {
     final list = await widget.platform.getAppShortcuts(widget.app.packageName);
     if (!mounted) return;
-    setState(() => _shortcuts = list);
+    setState(() {
+      _shortcuts = list;
+      _loadingShortcuts = false;
+    });
   }
 
   @override
@@ -157,9 +161,63 @@ class _AppActionsSheetState extends State<AppActionsSheet> {
                 ],
               ),
 
-              // Dynamic Shortcuts (if available)
-              if (_shortcuts.isNotEmpty) ...[
-                const SizedBox(height: 14),
+              // App Tasks / Dynamic Shortcuts section
+              const SizedBox(height: 14),
+              Text(
+                'APP TASKS',
+                style: TextStyle(
+                  color: widget.accent.withValues(alpha: 0.8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.1,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_loadingShortcuts)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B1F1D),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: widget.accent,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Loading app tasks...',
+                        style: TextStyle(
+                          color: LauncherColors.textSecondary,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (_shortcuts.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B1F1D),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: const Text(
+                    'No app tasks found (requires Fluee as default home app)',
+                    style: TextStyle(
+                      color: LauncherColors.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                )
+              else
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                   decoration: BoxDecoration(
@@ -243,7 +301,6 @@ class _AppActionsSheetState extends State<AppActionsSheet> {
                     ],
                   ),
                 ),
-              ],
 
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),

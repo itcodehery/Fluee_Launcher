@@ -11,7 +11,9 @@ import 'package:fluee_launcher/services/launcher_preferences.dart';
 import 'package:fluee_launcher/theme/app_shapes.dart';
 import 'package:fluee_launcher/widgets/app_panel.dart';
 import 'package:fluee_launcher/widgets/app_tile.dart';
+import 'package:fluee_launcher/widgets/ambient_lock_keypad.dart';
 import 'package:fluee_launcher/widgets/launcher_clock.dart';
+import 'package:fluee_launcher/widgets/launcher_dock.dart';
 import 'package:fluee_launcher/widgets/profile_dashboard.dart';
 import 'package:fluee_launcher/widgets/quick_apps_panel.dart';
 import 'package:fluee_launcher/widgets/quick_tasks_bar.dart';
@@ -155,16 +157,24 @@ void main() {
       ),
     );
 
-    // Initial state: AppPanel is rendered in Grid mode
+    // Initial state: AppPanel is rendered in Categorized mode
     expect(find.byType(AppPanel), findsOneWidget);
-    expect(find.byType(GridView), findsOneWidget);
+    expect(find.text('Apps'), findsOneWidget);
+    expect(find.byIcon(Icons.filter_list_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.grid_view_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.search_rounded), findsOneWidget);
 
-    // Expand panel
-    final handle = find.byType(GestureDetector).first;
-    await tester.tap(handle);
+    // Switch to All Apps mode
+    await tester.tap(find.byIcon(Icons.grid_view_rounded));
     await tester.pumpAndSettle();
 
-    expect(isExpanded, true);
+    expect(find.text('All Apps'), findsOneWidget);
+    expect(find.byType(GridView), findsOneWidget);
+
+    // Open search via Search FAB
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle();
+
     expect(find.byType(TextField), findsOneWidget);
     final textField = tester.widget<TextField>(find.byType(TextField));
     expect(textField.focusNode?.hasFocus, true);
@@ -174,11 +184,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Chrome'), findsWidgets);
-
-    // Collapse panel
-    await tester.tap(handle);
-    await tester.pumpAndSettle();
-    expect(isExpanded, false);
+    expect(isExpanded, isFalse);
   });
 
   testWidgets('AppPanel searches hidden apps when searchIncludesHidden is enabled',
@@ -220,17 +226,20 @@ void main() {
       ),
     );
 
-    // Initial state: only visible app is displayed
+    // Open search via Search FAB
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle();
     expect(find.byType(TextField), findsOneWidget);
 
     // Search for hidden app
     await tester.enterText(find.byType(TextField), 'Hidden');
     await tester.pumpAndSettle();
 
-    expect(find.byType(AppTile), findsOneWidget);
+    expect(find.byKey(ValueKey('drawer-tile-${hiddenApp.id}')), findsOneWidget);
+    expect(find.byKey(ValueKey('drawer-tile-${visibleApp.id}')), findsNothing);
   });
 
-  testWidgets('AppPanel renders in List mode and supports sorting and recents',
+  testWidgets('AppPanel renders categorized cards and expands on tap',
       (WidgetTester tester) async {
     final sampleApps = [
       AppItem(
@@ -259,7 +268,6 @@ void main() {
             metrics: TileMetrics.forWidth(400),
             dockHeight: 80,
             isExpanded: true,
-            drawerMode: DrawerMode.list,
             accent: Colors.teal,
             onExpandedChanged: (_) {},
             onAppTap: (_) {},
@@ -269,9 +277,15 @@ void main() {
       ),
     );
 
-    // Verify list mode renders app labels
-    expect(find.text('Chrome'), findsOneWidget);
-    expect(find.text('Camera'), findsOneWidget);
+    // Categorized mode renders category cards
+    expect(find.text('Apps'), findsOneWidget);
+    expect(find.text('Internet'), findsOneWidget);
+    expect(find.text('Media'), findsOneWidget);
+
+    // Expand Internet category to reveal Chrome
+    await tester.tap(find.text('Internet'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('drawer-tile-${sampleApps.first.id}')), findsOneWidget);
   });
 
   test('AppShortcut model decodes correctly', () {
@@ -408,7 +422,7 @@ void main() {
     expect(longPressedIndex, 0);
   });
 
-  testWidgets('AppPanel expands playing media app to 2 columns with title and artist',
+  testWidgets('AppPanel All Apps mode renders 4-column grid and handles app tap',
       (WidgetTester tester) async {
     final apps = [
       AppItem(
@@ -449,9 +463,6 @@ void main() {
             dockHeight: 80,
             isExpanded: false,
             accent: Colors.teal,
-            mediaPackageName: 'com.spotify.music',
-            mediaTitle: 'Loyal',
-            mediaArtist: 'ODESZA',
             onExpandedChanged: (_) {},
             onAppTap: (a) => tappedApp = a,
             onAppLongPress: (_) {},
@@ -460,21 +471,21 @@ void main() {
       ),
     );
 
-    expect(find.byType(MediaAppTile), findsOneWidget);
-    expect(find.text('Loyal'), findsOneWidget);
-    expect(find.text('ODESZA'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.grid_view_rounded));
+    await tester.pumpAndSettle();
 
-    final mediaBox = tester.getSize(find.byType(MediaAppTile));
-    expect(mediaBox.width, closeTo(metrics.tileSize * 2 + TileMetrics.gap, 0.01));
+    expect(find.text('All Apps'), findsOneWidget);
+    expect(find.byType(GridView), findsOneWidget);
+    expect(find.byType(Tooltip), findsNWidgets(3));
 
-    await tester.tap(find.byType(MediaAppTile));
+    await tester.tap(find.byKey(ValueKey('drawer-tile-${apps[1].id}')));
     expect(tappedApp?.packageName, 'com.spotify.music');
   });
 
-  testWidgets('Expanded dashboard hides the clock and only the chevron collapses it',
+  testWidgets('Expanded dashboard hides the clock and split clock collapses it',
       (WidgetTester tester) async {
     final controller = LauncherClockController();
-    var chevronTaps = 0;
+    var collapseTaps = 0;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -491,7 +502,7 @@ void main() {
                 platform: LauncherPlatform(),
                 name: 'Hari',
                 onCollapse: () {
-                  chevronTaps++;
+                  collapseTaps++;
                   controller.collapse();
                 },
               ),
@@ -513,12 +524,14 @@ void main() {
     await tester.tap(find.text('Hey Hari,'));
     await tester.pumpAndSettle();
     expect(controller.isExpanded, isTrue);
-    expect(chevronTaps, 0);
+    expect(collapseTaps, 0);
 
-    // The chevron inside the dashboard is the only collapse affordance.
-    await tester.tap(find.byIcon(Icons.keyboard_arrow_up_rounded));
+    // Tapping the split minute tile collapses the dashboard.
+    final now = DateTime.now();
+    final minStr = now.minute.toString().padLeft(2, '0');
+    await tester.tap(find.text(minStr).last);
     await tester.pumpAndSettle();
-    expect(chevronTaps, 1);
+    expect(collapseTaps, 1);
     expect(controller.isExpanded, isFalse);
     expect(find.textContaining(':'), findsOneWidget);
   });
@@ -622,7 +635,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Media tile wraps to the next row when it would not fit',
+  testWidgets('AppPanel search FAB opens and closes inline search field',
       (WidgetTester tester) async {
     AppItem app(String label, String pkg) => AppItem(
           label: label,
@@ -641,7 +654,6 @@ void main() {
       app('Arc', 'company.thebrowser.arc'),
     ];
 
-    AppItem? tapped;
     final metrics = TileMetrics.forWidth(400);
 
     await tester.pumpWidget(
@@ -653,28 +665,270 @@ void main() {
             dockHeight: 80,
             isExpanded: true,
             accent: Colors.teal,
-            mediaPackageName: 'com.spotify.music',
-            mediaTitle: 'Loyal',
-            mediaArtist: 'ODESZA',
-            mediaIsPlaying: false,
             onExpandedChanged: (_) {},
-            onAppTap: (a) => tapped = a,
+            onAppTap: (_) {},
             onAppLongPress: (_) {},
           ),
         ),
       ),
     );
 
-    // Media app sits at index 3, so the 2-column tile is pushed to the next row without
-    // overflowing the panel.
     expect(tester.takeException(), isNull);
-    expect(find.byType(MediaAppTile), findsOneWidget);
-    expect(tester.getSize(find.byType(MediaAppTile)).width,
-        closeTo(metrics.tileSize * 2 + TileMetrics.gap, 0.01));
-    // Paused playback is indicated instead of the playing waveform.
-    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
 
-    await tester.tap(find.byType(MediaAppTile));
-    expect(tapped?.packageName, 'com.spotify.music');
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('LauncherDock swipes through apps one by one with center highlight',
+      (WidgetTester tester) async {
+    AppItem app(String label, String pkg) => AppItem(
+          label: label,
+          packageName: pkg,
+          activityName: 'Main',
+          userSerial: 0,
+          icon: Uint8List(0),
+          isMonochrome: false,
+        );
+
+    final slots = List<AppItem?>.generate(
+      maxDockApps,
+      (i) => i < 8 ? app('App $i', 'com.example.app$i') : null,
+    );
+    slots[2] = app('Phone', 'com.android.dialer');
+    slots[3] = app('Messages', 'com.android.messaging');
+
+    AppItem? tapped;
+    int? emptySlot;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.bottomCenter,
+            child: LauncherDock(
+              slots: slots,
+              accent: Colors.teal,
+              onAppTap: (a) => tapped = a,
+              onAppLongPress: (_, _) {},
+              onEmptySlotTap: (i) => emptySlot = i,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Slot 2 ('Phone') starts centered and largest (82x82).
+    expect(find.text('Phone'), findsOneWidget);
+    expect(find.text('Messages'), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.apps_rounded).at(2));
+    expect(tapped?.packageName, 'com.android.dialer');
+
+    // Swipe left by 1 item (0.20 * 800 = 160px) to move slot 3 ('Messages') to center.
+    await tester.drag(find.byType(PageView), const Offset(-160, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Messages'), findsOneWidget);
+    expect(find.text('Phone'), findsNothing);
+
+    // Tap the '+' slot to verify empty slot callback.
+    await tester.drag(find.byType(PageView), const Offset(-640, 0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add_rounded).first);
+    expect(emptySlot, isNotNull);
+  });
+
+  testWidgets('LauncherClock bigClock ambient style shrinks hour smaller than minute for keypad',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: LauncherClock(
+              accent: Colors.teal,
+              batteryLevel: 49,
+              isIdle: true,
+              ambientStyle: AmbientStyle.bigClock,
+              isCompactForKeypad: true,
+              onTap: () {},
+              onSettingsTap: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final now = DateTime.now();
+    final use24h = MediaQuery.alwaysUse24HourFormatOf(
+      tester.element(find.byType(LauncherClock)),
+    );
+    final h = use24h ? now.hour : (now.hour % 12 == 0 ? 12 : now.hour % 12);
+    final hourStr = h.toString().padLeft(2, '0');
+    final minStr = now.minute.toString().padLeft(2, '0');
+
+    final hourBox = tester.getSize(find.text(hourStr).first);
+    final minBox = tester.getSize(find.text(minStr).last);
+    expect(hourBox.height, lessThan(minBox.height));
+  });
+
+  testWidgets('AmbientLockKeypad unlocks when expected PIN is entered',
+      (WidgetTester tester) async {
+    var unlocked = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: AmbientLockKeypad(
+              accent: Colors.teal,
+              expectedPin: '1234',
+              onUnlocked: () => unlocked = true,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('1'));
+    await tester.tap(find.text('2'));
+    await tester.tap(find.text('3'));
+    await tester.tap(find.text('4'));
+    await tester.pumpAndSettle();
+    expect(unlocked, isFalse);
+    expect(find.byKey(const ValueKey('pin-shape-0')), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.check_rounded));
+    await tester.pumpAndSettle();
+
+    expect(unlocked, isTrue);
+    expect(find.byKey(const ValueKey('pin-shape-0')), findsNothing);
+  });
+
+  testWidgets('LauncherClock ambient pillsGlow mode shows all three pills',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: LauncherClock(
+              accent: Colors.teal,
+              batteryLevel: 49,
+              isIdle: true,
+              ambientStyle: AmbientStyle.pillsGlow,
+              onTap: () {},
+              onSettingsTap: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('49%'), findsOneWidget);
+    expect(find.textContaining(':'), findsOneWidget);
+    expect(find.byType(BatteryCircleComplication), findsOneWidget);
+  });
+
+  testWidgets('ProfileDashboard displays pinned app tasks and handles taps',
+      (WidgetTester tester) async {
+    PinnedQuickTask? tappedTask;
+    const tasks = [
+      PinnedQuickTask(
+        packageName: 'com.google.android.apps.tasks',
+        shortcutId: 'new_task',
+        label: 'New Task',
+      ),
+      PinnedQuickTask(
+        packageName: 'com.google.zxing',
+        shortcutId: 'scan_qr',
+        label: 'Scan QR',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProfileDashboard(
+            accent: Colors.teal,
+            platform: LauncherPlatform(),
+            name: 'Hari',
+            batteryLevel: 56,
+            pinnedTasks: tasks,
+            onTaskTap: (t) => tappedTask = t,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Hey Hari,'), findsOneWidget);
+    expect(find.text('New Task'), findsOneWidget);
+    expect(find.text('Scan QR'), findsOneWidget);
+
+    await tester.tap(find.text('Scan QR'));
+    await tester.pumpAndSettle();
+    expect(tappedTask?.shortcutId, 'scan_qr');
+  });
+
+  testWidgets('AppPanel allows only one category open at a time',
+      (WidgetTester tester) async {
+    final sampleApps = [
+      AppItem(
+        label: 'Chrome',
+        packageName: 'com.android.chrome',
+        activityName: 'Main',
+        userSerial: 0,
+        icon: Uint8List(0),
+        isMonochrome: true,
+      ),
+      AppItem(
+        label: 'Camera',
+        packageName: 'com.android.camera',
+        activityName: 'Main',
+        userSerial: 0,
+        icon: Uint8List(0),
+        isMonochrome: true,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppPanel(
+            apps: sampleApps,
+            metrics: TileMetrics.forWidth(400),
+            dockHeight: 80,
+            isExpanded: true,
+            accent: Colors.teal,
+            onExpandedChanged: (_) {},
+            onAppTap: (_) {},
+            onAppLongPress: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Internet'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('drawer-tile-${sampleApps[0].id}')), findsOneWidget);
+    expect(find.byKey(ValueKey('drawer-tile-${sampleApps[1].id}')), findsNothing);
+
+    await tester.tap(find.text('Media'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('drawer-tile-${sampleApps[0].id}')), findsNothing);
+    expect(find.byKey(ValueKey('drawer-tile-${sampleApps[1].id}')), findsOneWidget);
+  });
+
+  test('LauncherPreferences persists ambientTimeoutSeconds', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await LauncherPreferences.load();
+    expect(prefs.ambientTimeoutSeconds, 15);
+    await prefs.setAmbientTimeoutSeconds(30);
+    expect(prefs.ambientTimeoutSeconds, 30);
   });
 }

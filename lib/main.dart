@@ -8,12 +8,15 @@ import 'models/app_shortcut.dart';
 import 'services/launcher_platform.dart';
 import 'services/launcher_preferences.dart';
 import 'theme/launcher_colors.dart';
+import 'theme/m3_motion.dart';
 import 'widgets/app_actions_sheet.dart';
 import 'widgets/app_panel.dart';
 import 'widgets/app_tile.dart';
 import 'widgets/icon_picker_sheet.dart';
 import 'widgets/intro_flow.dart';
+import 'widgets/ambient_lock_keypad.dart';
 import 'widgets/launcher_clock.dart';
+import 'widgets/launcher_dock.dart';
 import 'widgets/profile_dashboard.dart';
 import 'widgets/quick_apps_panel.dart';
 import 'widgets/quick_tasks_bar.dart';
@@ -65,6 +68,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   List<AppShortcut> _allShortcuts = const [];
   List<PinnedQuickTask> _pinnedQuickTasks = const [];
   List<String> _quickIds = List<String>.filled(maxQuickApps, '');
+  List<String> _dockIds = List<String>.filled(maxDockApps, '');
   List<IconPackInfo> _availableIconPacks = const [];
   String? _selectedIconPack;
   Map<String, String> _customIconMap = const {};
@@ -76,10 +80,15 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   AppSortMode _sortMode = AppSortMode.az;
   List<String> _recentAppIds = const [];
   bool _ambientIdleMode = true;
+  int _ambientTimeoutSeconds = 15;
+  AmbientStyle _ambientStyle = AmbientStyle.pillsGlow;
+  bool _ambientLockEnabled = false;
+  String? _ambientLockPin;
   String? _ambientCustomText;
   String? _profileName;
   Uint8List? _profilePhoto;
   bool _isIdle = false;
+  bool _isAmbientKeypadShown = false;
   Timer? _idleTimer;
   Timer? _mediaPollTimer;
   Timer? _batteryPollTimer;
@@ -92,16 +101,14 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   bool _mediaIsPlaying = false;
   int? _mediaArtId;
 
-  final LauncherClockController _clockController = LauncherClockController();
-
   Color _customAccent = LauncherColors.defaultAccent;
   Color? _wallpaperAccent;
   bool _useWallpaperAccent = false;
   bool _isPanelExpanded = false;
-  bool _isQuickSettingsOpen = false;
-  double _qsDragOffset = 0.0;
+  bool _isDashboardOpen = false;
+  double _dashboardDragOffset = 0.0;
   double? _drawerDragT;
-  bool _isDraggingQs = false;
+  bool _isDraggingDashboard = false;
   int? _dragPointer;
   Offset _dragOrigin = Offset.zero;
   bool _dragClaimed = false;
@@ -109,8 +116,7 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   double _maxH = 800;
   VelocityTracker? _velocityTracker;
 
-  static const double _qsPanelHeight = 252.0;
-  static const double _qsTravel = _qsPanelHeight + 16.0;
+  static const double _dashboardTravel = 340.0;
   bool _hasCompletedIntro = true;
   bool _isInitialized = false;
 
@@ -125,9 +131,92 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
   List<String> _normalizeQuick(List<String> ids) => List<String>.generate(
       maxQuickApps, (i) => i < ids.length ? ids[i] : '');
 
+  List<String> _normalizeDock(List<String> ids) => List<String>.generate(
+      maxDockApps, (i) => i < ids.length ? ids[i] : '');
+
   List<AppItem?> get _quickSlots {
     final byId = {for (final a in _allApps) a.id: a};
     return [for (final id in _quickIds) byId[id]];
+  }
+
+  List<AppItem?> get _dockSlots {
+    final byId = {for (final a in _allApps) a.id: a};
+    return [for (final id in _dockIds) byId[id]];
+  }
+
+  Future<void> _setDockIds(List<String> ids) async {
+    setState(() => _dockIds = ids);
+    await _prefs?.setDockAppIds(ids);
+  }
+
+  void _pickDockApp(int slot) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetCtx) => QuickAppPickerSheet(
+        apps: _visibleApps,
+        onSelected: (app) {
+          Navigator.pop(sheetCtx);
+          final current = List<String>.from(_dockIds);
+          final existing = current.indexOf(app.id);
+          if (existing >= 0) current[existing] = '';
+          current[slot] = app.id;
+          _setDockIds(current);
+        },
+      ),
+    );
+  }
+
+  void _showDockSlotMenu(int slot, AppItem app) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                app.label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: Icon(Icons.bolt_rounded, color: _effectiveAccent),
+                title: const Text('App tasks & info', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _showAppActions(app);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.swap_horiz_rounded, color: _effectiveAccent),
+                title: const Text('Replace dock app', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _pickDockApp(slot);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded, color: LauncherColors.danger),
+                title: const Text('Remove from dock', style: TextStyle(color: LauncherColors.danger)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  final current = List<String>.from(_dockIds);
+                  current[slot] = '';
+                  _setDockIds(current);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _setQuickIds(List<String> ids) async {
@@ -146,24 +235,6 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
       current[free] = app.id;
     }
     await _setQuickIds(current);
-  }
-
-  void _pickQuickApp(int slot) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetCtx) => QuickAppPickerSheet(
-        apps: _visibleApps,
-        onSelected: (app) {
-          Navigator.pop(sheetCtx);
-          final current = List<String>.from(_quickIds);
-          final existing = current.indexOf(app.id);
-          if (existing >= 0) current[existing] = '';
-          current[slot] = app.id;
-          _setQuickIds(current);
-        },
-      ),
-    );
   }
 
   @override
@@ -221,12 +292,17 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
       _autoFocusSearch = prefs.autoFocusSearch;
       _searchIncludesHidden = prefs.searchIncludesHidden;
       _ambientIdleMode = prefs.ambientIdleMode;
+      _ambientTimeoutSeconds = prefs.ambientTimeoutSeconds;
+      _ambientStyle = prefs.ambientStyle;
+      _ambientLockEnabled = prefs.ambientLockEnabled;
+      _ambientLockPin = prefs.ambientLockPin;
       _ambientCustomText = prefs.ambientCustomText;
       _profileName = prefs.profileName;
       _profilePhoto = prefs.profilePhoto;
       _availableIconPacks = iconPacks;
       _allApps = apps;
       _quickIds = _normalizeQuick(prefs.quickAppIds);
+      _dockIds = _normalizeDock(prefs.dockAppIds);
       _pinnedQuickTasks = prefs.pinnedQuickTasks;
       _isInitialized = true;
     });
@@ -257,10 +333,15 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
       _autoFocusSearch = _prefs!.autoFocusSearch;
       _searchIncludesHidden = _prefs!.searchIncludesHidden;
       _ambientIdleMode = _prefs!.ambientIdleMode;
+      _ambientTimeoutSeconds = _prefs!.ambientTimeoutSeconds;
+      _ambientStyle = _prefs!.ambientStyle;
+      _ambientLockEnabled = _prefs!.ambientLockEnabled;
+      _ambientLockPin = _prefs!.ambientLockPin;
       _ambientCustomText = _prefs!.ambientCustomText;
       _profileName = _prefs!.profileName;
       _profilePhoto = _prefs!.profilePhoto;
       _quickIds = _normalizeQuick(_prefs!.quickAppIds);
+      _dockIds = _normalizeDock(_prefs!.dockAppIds);
       _pinnedQuickTasks = _prefs!.pinnedQuickTasks;
       _hiddenAppIds = _prefs!.hiddenAppIds;
       _selectedIconPack = _prefs!.selectedIconPack;
@@ -351,10 +432,31 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     }
   }
 
+  bool get _hasAmbientPin =>
+      _ambientLockEnabled &&
+      _ambientLockPin != null &&
+      _ambientLockPin!.isNotEmpty;
+
+  void _setIdle(bool idle, {bool showKeypad = false}) {
+    if (_isIdle != idle) {
+      _platform.setWindowDim(idle);
+    }
+    setState(() {
+      _isIdle = idle;
+      _isAmbientKeypadShown = idle ? showKeypad : false;
+    });
+  }
+
   void _onUserInteraction() {
     if (_isIdle) {
+      if (_hasAmbientPin) {
+        if (!_isAmbientKeypadShown && mounted) {
+          setState(() => _isAmbientKeypadShown = true);
+        }
+        return;
+      }
       if (mounted) {
-        setState(() => _isIdle = false);
+        _setIdle(false);
       }
     }
     _resetIdleTimer();
@@ -362,14 +464,13 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
 
   void _resetIdleTimer() {
     _idleTimer?.cancel();
-    if (!_ambientIdleMode || _isPanelExpanded || _isQuickSettingsOpen) {
+    if (!_ambientIdleMode || _isPanelExpanded || _isDashboardOpen) {
       return;
     }
-    // Idle threshold between 7-9 seconds (8 seconds)
-    _idleTimer = Timer(const Duration(seconds: 8), () {
+    _idleTimer = Timer(Duration(seconds: _ambientTimeoutSeconds), () {
       if (!mounted) return;
-      if (!_isPanelExpanded && !_isQuickSettingsOpen && _ambientIdleMode) {
-        setState(() => _isIdle = true);
+      if (!_isPanelExpanded && !_isDashboardOpen && _ambientIdleMode) {
+        _setIdle(true);
       }
     });
   }
@@ -395,19 +496,26 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     if (!mounted) return;
     _hideStatusBar();
     Navigator.of(context).popUntil((route) => route.isFirst);
+    if (!_hasAmbientPin && _isIdle) {
+      _platform.setWindowDim(false);
+    }
     setState(() {
-      _isDraggingQs = false;
+      _isDraggingDashboard = false;
       _drawerDragT = null;
-      _qsDragOffset = 0.0;
+      _dashboardDragOffset = 0.0;
       _isPanelExpanded = false;
-      _isQuickSettingsOpen = false;
-      _isIdle = false;
+      _isDashboardOpen = false;
+      if (!_hasAmbientPin) {
+        _isIdle = false;
+        _isAmbientKeypadShown = false;
+      }
     });
     _resetIdleTimer();
   }
 
   @override
   void dispose() {
+    _platform.setWindowDim(false);
     _idleTimer?.cancel();
     _mediaPollTimer?.cancel();
     _batteryPollTimer?.cancel();
@@ -427,24 +535,15 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     await _prefs?.setHiddenAppIds(current);
   }
 
-  Future<void> _handleDoubleTapToLock() async {
-    HapticFeedback.mediumImpact();
-    final isEnabled = await _platform.isAccessibilityServiceEnabled();
-    if (isEnabled) {
-      await _platform.lockScreen();
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Enable Accessibility to lock screen on double-tap'),
-          action: SnackBarAction(
-            label: 'Enable',
-            textColor: _effectiveAccent,
-            onPressed: _platform.openAccessibilitySettings,
-          ),
-        ),
-      );
-    }
+  void _hideDashboard() {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _isDraggingDashboard = false;
+      _drawerDragT = null;
+      _dashboardDragOffset = 0.0;
+      _isDashboardOpen = false;
+    });
+    _resetIdleTimer();
   }
 
   void _showRenameDialog(AppItem app) {
@@ -524,7 +623,11 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     await _setPinnedQuickTasks(current);
   }
 
-  void _pickQuickTask({int? replaceIndex}) {
+  Future<void> _pickQuickTask({int? replaceIndex}) async {
+    if (_allShortcuts.isEmpty) {
+      await _loadShortcuts();
+    }
+    if (!mounted) return;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -695,10 +798,6 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     }
   }
 
-  double _computeCollapsedHeight(TileMetrics metrics, double bottomInset) {
-    return dragHandleHeight + 4.0 + (metrics.tileSize * 2) + TileMetrics.gap + bottomInset + 12.0;
-  }
-
   void _onPointerDown(PointerDownEvent e) {
     final wasIdle = _isIdle;
     _onUserInteraction();
@@ -715,22 +814,22 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     if (e.pointer != _dragPointer) return;
     _velocityTracker?.addPosition(e.timeStamp, e.position);
     final d = e.position - _dragOrigin;
-    final drawerTravel = _maxH - _computeCollapsedHeight(TileMetrics.forWidth(400), 0);
+    final drawerTravel = _maxH > 0 ? _maxH : 800.0;
     if (!_dragClaimed) {
       if (d.dy.abs() > 18 && d.dy.abs() > d.dx.abs() * 1.5) {
         _dragClaimed = true;
         _dragOrigin = e.position;
-        _dragStartPos = _isQuickSettingsOpen ? _qsTravel : 0.0;
+        _dragStartPos = _isDashboardOpen ? _dashboardTravel : 0.0;
       } else {
         return;
       }
     }
     final pos = (_dragStartPos + (e.position.dy - _dragOrigin.dy))
-        .clamp(-drawerTravel, _qsTravel);
+        .clamp(-drawerTravel, _dashboardTravel);
     setState(() {
-      _isDraggingQs = true;
-      _qsDragOffset = pos > 0 ? pos : 0.0;
-      _drawerDragT = pos < 0 ? (-pos / drawerTravel) : 0.0;
+      _isDraggingDashboard = true;
+      _dashboardDragOffset = pos > 0 ? pos : 0.0;
+      _drawerDragT = (!_isDashboardOpen && pos < 0) ? (-pos / drawerTravel) : 0.0;
     });
   }
 
@@ -738,52 +837,41 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     if (e.pointer != _dragPointer) return;
     final claimed = _dragClaimed;
     final velocity = _velocityTracker?.getVelocity().pixelsPerSecond.dy ?? 0;
-    final drawerTravel = _maxH - _computeCollapsedHeight(TileMetrics.forWidth(400), 0);
+    final drawerTravel = _maxH > 0 ? _maxH : 800.0;
     _dragPointer = null;
     _velocityTracker = null;
     _dragClaimed = false;
     if (!claimed) return;
 
-    final pos = _qsDragOffset > 0 ? _qsDragOffset : -(_drawerDragT ?? 0) * drawerTravel;
+    final pos = _dashboardDragOffset > 0
+        ? _dashboardDragOffset
+        : -(_drawerDragT ?? 0) * drawerTravel;
     int target;
     if (velocity > 300) {
       target = pos < 0 ? 0 : 1;
     } else if (velocity < -300) {
       target = pos > 0 ? 0 : -1;
-    } else if (pos > _qsTravel * 0.4) {
+    } else if (pos > _dashboardTravel * 0.35) {
       target = 1;
-    } else if (pos < -drawerTravel * 0.2) {
+    } else if (pos < -drawerTravel * 0.16) {
       target = -1;
     } else {
       target = 0;
     }
     HapticFeedback.lightImpact();
     setState(() {
-      _isDraggingQs = false;
+      _isDraggingDashboard = false;
       _drawerDragT = null;
-      _isQuickSettingsOpen = target == 1;
-      _isPanelExpanded = target == -1;
-      _qsDragOffset = target == 1 ? _qsTravel : 0.0;
+      if (_isDashboardOpen && target != 1) {
+        _isDashboardOpen = false;
+        _dashboardDragOffset = 0.0;
+      } else {
+        _isDashboardOpen = target == 1;
+        _isPanelExpanded = target == -1;
+        _dashboardDragOffset = target == 1 ? _dashboardTravel : 0.0;
+      }
     });
     _resetIdleTimer();
-  }
-  void _showQuickSettings() {
-    HapticFeedback.lightImpact();
-    setState(() {
-      _isDraggingQs = false;
-      _qsDragOffset = _qsTravel;
-      _isQuickSettingsOpen = true;
-    });
-  }
-
-  void _hideQuickSettings() {
-    HapticFeedback.lightImpact();
-    setState(() {
-      _isDraggingQs = false;
-      _drawerDragT = null;
-      _qsDragOffset = 0.0;
-      _isQuickSettingsOpen = false;
-    });
   }
 
   void _openCalendar() {
@@ -806,6 +894,10 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
           autoFocusSearch: _autoFocusSearch,
           searchIncludesHidden: _searchIncludesHidden,
           ambientIdleMode: _ambientIdleMode,
+          ambientTimeoutSeconds: _ambientTimeoutSeconds,
+          ambientStyle: _ambientStyle,
+          ambientLockEnabled: _ambientLockEnabled,
+          ambientLockPin: _ambientLockPin,
           ambientCustomText: _ambientCustomText,
           profileName: _profileName,
           profilePhoto: _profilePhoto,
@@ -878,13 +970,33 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
             await _prefs?.setAmbientIdleMode(val);
             _resetIdleTimer();
           },
+          onAmbientTimeoutChanged: (seconds) async {
+            if (!mounted) return;
+            setState(() => _ambientTimeoutSeconds = seconds);
+            await _prefs?.setAmbientTimeoutSeconds(seconds);
+            _resetIdleTimer();
+          },
+          onAmbientStyleChanged: (style) async {
+            if (!mounted) return;
+            setState(() => _ambientStyle = style);
+            await _prefs?.setAmbientStyle(style);
+          },
+          onToggleAmbientLock: (val) async {
+            if (!mounted) return;
+            setState(() => _ambientLockEnabled = val);
+            await _prefs?.setAmbientLockEnabled(val);
+          },
+          onAmbientLockPinChanged: (pin) async {
+            if (!mounted) return;
+            setState(() => _ambientLockPin = pin);
+            await _prefs?.setAmbientLockPin(pin);
+          },
           onAmbientCustomTextChanged: (text) async {
             if (!mounted) return;
             setState(() => _ambientCustomText = text);
             await _prefs?.setAmbientCustomText(text);
           },
           onOpenHomeSettings: _platform.openHomeSettings,
-          onOpenAccessibilitySettings: _platform.openAccessibilitySettings,
           onOpenNotificationListenerSettings: _platform.openNotificationListenerSettings,
         ),
       ),
@@ -934,8 +1046,10 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (_, _) {
-        if (_isQuickSettingsOpen) {
-          _hideQuickSettings();
+        if (_isIdle && _isAmbientKeypadShown) {
+          setState(() => _isAmbientKeypadShown = false);
+        } else if (_isDashboardOpen) {
+          _hideDashboard();
         } else if (_isPanelExpanded) {
           setState(() => _isPanelExpanded = false);
         }
@@ -955,53 +1069,66 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
             final dockHeight = padding.bottom;
 
             _maxH = maxH;
-            final collapsedH = _computeCollapsedHeight(metrics, padding.bottom);
-            final drawerT = _drawerDragT ?? (_isPanelExpanded ? 1.0 : 0.0);
-            final targetPanelHeight = collapsedH + (maxH - collapsedH) * drawerT;
+            final drawerT = (_drawerDragT ?? (_isPanelExpanded ? 1.0 : 0.0)).clamp(0.0, 1.0);
+            final dashboardT = _isDraggingDashboard
+                ? (_dashboardDragOffset / _dashboardTravel).clamp(0.0, 1.0)
+                : (_isDashboardOpen ? 1.0 : 0.0);
 
-            final dragRatio = (_qsDragOffset / _qsTravel).clamp(0.0, 1.0);
-
-            final restingClockTop = _isIdle ? (maxH * 0.18) : (padding.top + 16.0);
-            final openClockTop = padding.top + _qsPanelHeight + 12.0;
-
-            final qsOpenTop = padding.top + 8.0;
-            final qsClosedTop = -_qsPanelHeight - 20.0;
-            final double qsTop;
             final double clockTop;
-            final double panelBottom;
-            final double qsOpacity;
-            final double glowOpacity;
-
-            if (_isDraggingQs) {
-              qsTop = qsClosedTop + (_qsTravel + 20.0) * dragRatio;
-              clockTop = restingClockTop + (openClockTop - restingClockTop) * dragRatio;
-              panelBottom = -collapsedH * dragRatio;
-              qsOpacity = dragRatio;
-              glowOpacity = dragRatio;
+            if (_isIdle) {
+              if (_isAmbientKeypadShown) {
+                clockTop = _ambientStyle == AmbientStyle.bigClock
+                    ? (padding.top + 14.0)
+                    : (maxH * 0.14);
+              } else {
+                clockTop = _ambientStyle == AmbientStyle.bigClock
+                    ? (maxH * 0.14)
+                    : (maxH * 0.44);
+              }
             } else {
-              qsTop = _isQuickSettingsOpen ? qsOpenTop : qsClosedTop;
-              clockTop = _isQuickSettingsOpen ? openClockTop : restingClockTop;
-              panelBottom = (_isQuickSettingsOpen || _isIdle) ? -targetPanelHeight : 0.0;
-              qsOpacity = _isQuickSettingsOpen ? 1.0 : 0.0;
-              glowOpacity = _isQuickSettingsOpen ? 1.0 : 0.0;
+              clockTop = padding.top + 18.0;
             }
 
-            final clockOpacity = (_isPanelExpanded && _drawerDragT == null)
-                ? 0.0
-                : (1.0 - drawerT).clamp(0.0, 1.0);
+            final topGlowOpacity = _isIdle ? 0.0 : dashboardT * (1.0 - drawerT);
 
-            final animDuration = _isDraggingQs
+            final clockVisible = !(_isPanelExpanded && _drawerDragT == null);
+            final clockOpacity = _isIdle
+                ? 1.0
+                : (clockVisible
+                    ? ((1.0 - drawerT * 1.6) * (1.0 - dashboardT * 1.4)).clamp(0.0, 1.0)
+                    : 0.0);
+
+            final dockVisible =
+                !_isIdle &&
+                !_isDashboardOpen &&
+                !(_isPanelExpanded && _drawerDragT == null);
+            final dockOpacity = dockVisible
+                ? ((1.0 - drawerT * 2.0) * (1.0 - dashboardT * 1.6))
+                    .clamp(0.0, 1.0)
+                : 0.0;
+
+            final keypadVisible = _isIdle && _isAmbientKeypadShown && _hasAmbientPin;
+
+            final animDuration = _isDraggingDashboard
                 ? Duration.zero
-                : Duration(milliseconds: _isIdle ? 1100 : 240);
+                : M3Motion.slowSpatial.duration;
+            final panelBottom = _isIdle
+                ? -maxH
+                : -maxH * (1.0 - drawerT);
 
             return Stack(
               children: [
-                // Custom or Default Background Wallpaper with Double-Tap to Sleep, Long-Press for Settings, & Swipe-Down for Quick Settings
+                // Pure black wallpaper; tap collapses dashboard, long-press opens Settings
                 Positioned.fill(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onDoubleTap: _handleDoubleTapToLock,
+                    onTap: () {
+                      if (_isDashboardOpen) {
+                        _hideDashboard();
+                      }
+                    },
                     onLongPress: () {
+                      if (_isIdle) return;
                       HapticFeedback.mediumImpact();
                       _openSettingsPage();
                     },
@@ -1009,29 +1136,31 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                   ),
                 ),
 
-                // Subtle radial glow / gradient of the accent color when Quick Settings is open
+                // Subtle radial glow at the top when Dashboard is swiped down
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
-                  height: maxH * 0.60,
+                  height: maxH * 0.62,
                   child: IgnorePointer(
                     child: AnimatedOpacity(
-                      duration: animDuration,
-                      curve: Curves.easeOutCubic,
-                      opacity: glowOpacity,
+                      duration: _isDraggingDashboard
+                          ? Duration.zero
+                          : M3Motion.defaultEffects.duration,
+                      curve: M3Motion.defaultEffects,
+                      opacity: topGlowOpacity,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: RadialGradient(
-                            center: const Alignment(0.0, -1.35),
-                            radius: 1.4,
+                            center: const Alignment(0.0, -1.25),
+                            radius: 1.35,
                             colors: [
-                              _effectiveAccent.withValues(alpha: 0.45),
-                              _effectiveAccent.withValues(alpha: 0.25),
-                              _effectiveAccent.withValues(alpha: 0.08),
+                              _effectiveAccent.withValues(alpha: 0.42),
+                              _effectiveAccent.withValues(alpha: 0.20),
+                              _effectiveAccent.withValues(alpha: 0.05),
                               Colors.transparent,
                             ],
-                            stops: const [0.0, 0.40, 0.75, 1.0],
+                            stops: const [0.0, 0.38, 0.72, 1.0],
                           ),
                         ),
                       ),
@@ -1039,97 +1168,187 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                   ),
                 ),
 
-                // Inline Quick Settings Watch Shade positioned above the clock
-                AnimatedPositioned(
-                  duration: animDuration,
-                  curve: Curves.easeOutCubic,
-                  top: qsTop,
+                // Subtle bottom ambient glow behind the dock or ambient lock keypad
+                Positioned(
+                  bottom: 0,
                   left: 0,
                   right: 0,
-                  child: AnimatedOpacity(
-                    duration: animDuration,
-                    opacity: qsOpacity,
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      child: QuickAppsPanel(
-                        accent: _effectiveAccent,
-                        platform: _platform,
-                        slots: _quickSlots,
-                        onClose: _hideQuickSettings,
-                        onAppTap: (app) {
-                          _hideQuickSettings();
-                          _launchApp(app);
-                        },
-                        onAppLongPress: _showAppActions,
-                        onEmptySlotTap: _pickQuickApp,
+                  height: keypadVisible ? 420 : 380,
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      duration: _isDraggingDashboard
+                          ? Duration.zero
+                          : M3Motion.defaultEffects.duration,
+                      curve: M3Motion.defaultEffects,
+                      opacity: keypadVisible ? 1.0 : dockOpacity,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            center: const Alignment(0.0, 1.05),
+                            radius: 0.90,
+                            colors: [
+                              _effectiveAccent.withValues(alpha: 0.28),
+                              _effectiveAccent.withValues(alpha: 0.10),
+                              Colors.transparent,
+                            ],
+                            stops: const [0.0, 0.42, 1.0],
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-                // Clock area: Centered Pixel Watch clock with symmetrical circular complications
+                // Clock area: 3-pill Pixel Watch clock (or Ambient Mode)
                 AnimatedPositioned(
                   duration: animDuration,
-                  curve: Curves.easeOutCubic,
+                  curve: M3Motion.slowSpatial,
                   top: clockTop,
                   left: 0,
                   right: 0,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onDoubleTap: _handleDoubleTapToLock,
-                    child: AnimatedOpacity(
-                      opacity: clockOpacity,
-                      duration: _isDraggingQs ? Duration.zero : const Duration(milliseconds: 200),
-                      child: Align(
+                  child: IgnorePointer(
+                    ignoring: !clockVisible || _isIdle || dashboardT > 0.2,
+                    child: AnimatedScale(
+                      scale: _isIdle ? 1.0 : (1.0 - 0.10 * dashboardT),
+                      duration: _isDraggingDashboard
+                          ? Duration.zero
+                          : M3Motion.defaultSpatial.duration,
+                      curve: M3Motion.defaultSpatial,
+                      child: AnimatedOpacity(
+                        opacity: clockOpacity,
+                        duration: _isDraggingDashboard
+                            ? Duration.zero
+                            : M3Motion.defaultEffects.duration,
+                        curve: M3Motion.defaultEffects,
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: LauncherClock(
+                            accent: _effectiveAccent,
+                            batteryLevel: _batteryLevel,
+                            isCharging: _isCharging,
+                            onTap: _platform.openAlarms,
+                            onDateTap: _openCalendar,
+                            onSettingsTap: _openSettingsPage,
+                            isIdle: _isIdle,
+                            ambientStyle: _ambientStyle,
+                            isCompactForKeypad: _isAmbientKeypadShown,
+                            mediaTitle: _mediaTitle,
+                            mediaArtist: _mediaArtist,
+                            mediaIsPlaying: _mediaIsPlaying,
+                            customAmbientText: _ambientCustomText,
+                            onMediaTap: () {
+                              if (_allApps.isEmpty) return;
+                              AppItem? target;
+                              if (_mediaPackageName != null &&
+                                  _mediaPackageName!.isNotEmpty) {
+                                for (final a in _allApps) {
+                                  if (a.packageName == _mediaPackageName) {
+                                    target = a;
+                                    break;
+                                  }
+                                }
+                              }
+                              target ??= _allApps.firstWhere(
+                                (a) =>
+                                    a.packageName.contains('music') ||
+                                    a.packageName.contains('spotify') ||
+                                    a.packageName.contains('audio'),
+                                orElse: () => _allApps.first,
+                              );
+                              _launchApp(target);
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Top-half Dashboard revealed when swiping down on home screen
+                Positioned(
+                  top: padding.top + 18,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    ignoring: _isIdle || dashboardT < 0.2 || drawerT > 0.1,
+                    child: AnimatedSlide(
+                      offset: Offset(0, -0.06 * (1.0 - dashboardT)),
+                      duration: _isDraggingDashboard
+                          ? Duration.zero
+                          : M3Motion.defaultSpatial.duration,
+                      curve: M3Motion.defaultSpatial,
+                      child: AnimatedScale(
+                        scale: 0.94 + 0.06 * dashboardT,
                         alignment: Alignment.topCenter,
-                        child: LauncherClock(
-                          accent: _effectiveAccent,
-                          batteryLevel: _batteryLevel,
-                          isCharging: _isCharging,
-                          onTap: _platform.openAlarms,
-                          controller: _clockController,
-                          dashboard: ProfileDashboard(
+                        duration: _isDraggingDashboard
+                            ? Duration.zero
+                            : M3Motion.defaultSpatial.duration,
+                        curve: M3Motion.defaultSpatial,
+                        child: AnimatedOpacity(
+                          opacity: _isIdle
+                              ? 0.0
+                              : (dashboardT * (1.0 - drawerT * 2.0)).clamp(0.0, 1.0),
+                          duration: _isDraggingDashboard
+                              ? Duration.zero
+                              : M3Motion.defaultEffects.duration,
+                          curve: M3Motion.defaultEffects,
+                          child: ProfileDashboard(
                             accent: _effectiveAccent,
                             platform: _platform,
                             name: _profileName,
                             photo: _profilePhoto,
-                            onCollapse: _clockController.collapse,
+                            batteryLevel: _batteryLevel,
+                            isCharging: _isCharging,
+                            pinnedTasks: _pinnedQuickTasks,
+                            shortcuts: _allShortcuts,
+                            onTaskTap: (task) {
+                              _platform.startShortcut(
+                                task.packageName,
+                                task.shortcutId,
+                              );
+                            },
+                            onTaskLongPress: _showQuickTaskMenu,
+                            onAddTaskTap: () => _pickQuickTask(),
+                            onPowerTap: () {
+                              setState(() {
+                                _isDashboardOpen = false;
+                                _dashboardDragOffset = 0.0;
+                              });
+                              _setIdle(true);
+                            },
+                            onCollapse: _hideDashboard,
                             onSettingsTap: _openSettingsPage,
                           ),
-                          onDateTap: _openCalendar,
-                          onSettingsTap: _openSettingsPage,
-                          isIdle: _isIdle,
-                          mediaTitle: _mediaTitle,
-                          mediaArtist: _mediaArtist,
-                          mediaIsPlaying: _mediaIsPlaying,
-                          customAmbientText: _ambientCustomText,
-                          onMediaTap: () {
-                            if (_allApps.isEmpty) return;
-                            AppItem? target;
-                            if (_mediaPackageName != null &&
-                                _mediaPackageName!.isNotEmpty) {
-                              for (final a in _allApps) {
-                                if (a.packageName == _mediaPackageName) {
-                                  target = a;
-                                  break;
-                                }
-                              }
-                            }
-                            target ??= _allApps.firstWhere(
-                              (a) =>
-                                  a.packageName.contains('music') ||
-                                  a.packageName.contains('spotify') ||
-                                  a.packageName.contains('audio'),
-                              orElse: () => _allApps.first,
-                            );
-                            _launchApp(target);
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Ambient Lock Keypad (slides up with M3 slowSpatial spring)
+                AnimatedPositioned(
+                  duration: M3Motion.slowSpatial.duration,
+                  curve: M3Motion.slowSpatial,
+                  left: 0,
+                  right: 0,
+                  bottom: keypadVisible ? (padding.bottom + 56) : -440,
+                  child: IgnorePointer(
+                    ignoring: !keypadVisible,
+                    child: AnimatedOpacity(
+                      duration: M3Motion.defaultEffects.duration,
+                      curve: M3Motion.defaultEffects,
+                      opacity: keypadVisible ? 1.0 : 0.0,
+                      child: Center(
+                        child: AmbientLockKeypad(
+                          accent: _effectiveAccent,
+                          expectedPin: _ambientLockPin ?? '',
+                          isVisible: keypadVisible,
+                          onUnlocked: () {
+                            _setIdle(false);
+                            _resetIdleTimer();
                           },
-                          onWeatherTap: () {
-                            if (_isQuickSettingsOpen) {
-                              _hideQuickSettings();
-                            } else {
-                              _showQuickSettings();
-                            }
+                          onCancel: () {
+                            setState(() => _isAmbientKeypadShown = false);
                           },
                         ),
                       ),
@@ -1137,100 +1356,93 @@ class _LauncherScreenState extends State<LauncherScreen> with WidgetsBindingObse
                   ),
                 ),
 
-                // Pinned quick tasks (up to 2) right above the app drawer handle
-                if (_pinnedQuickTasks.isNotEmpty)
-                  AnimatedPositioned(
-                    duration: animDuration,
-                    curve: Curves.easeOutCubic,
-                    left: 0,
-                    right: 0,
-                    bottom: (_isQuickSettingsOpen || _isIdle)
-                        ? -(QuickTasksBar.barHeight + 24)
-                        : (collapsedH + 8),
-                    child: IgnorePointer(
-                      ignoring: _isPanelExpanded || _isQuickSettingsOpen || _isIdle || drawerT > 0.25,
-                      child: AnimatedOpacity(
-                        duration: _isDraggingQs
-                            ? Duration.zero
-                            : const Duration(milliseconds: 180),
-                        opacity: (_isQuickSettingsOpen || _isIdle)
-                            ? 0.0
-                            : (1.0 - drawerT * 2.5).clamp(0.0, 1.0),
-                        child: QuickTasksBar(
-                          tasks: _pinnedQuickTasks,
-                          shortcuts: _allShortcuts,
-                          accent: _effectiveAccent,
-                          onTaskTap: (task) {
-                            _platform.startShortcut(task.packageName, task.shortcutId);
-                          },
-                          onTaskLongPress: _showQuickTaskMenu,
-                          onAddTap: () => _pickQuickTask(),
-                        ),
+                // Continuous one-by-one swipable Dock at the bottom
+                AnimatedPositioned(
+                  duration: _isDraggingDashboard ? Duration.zero : animDuration,
+                  curve: M3Motion.slowSpatial,
+                  left: 0,
+                  right: 0,
+                  bottom: dockVisible
+                      ? (padding.bottom + 18 - 140 * dashboardT)
+                      : -140,
+                  child: IgnorePointer(
+                    ignoring: !dockVisible || drawerT > 0.2 || dashboardT > 0.2,
+                    child: AnimatedOpacity(
+                      duration: _isDraggingDashboard
+                          ? Duration.zero
+                          : M3Motion.defaultEffects.duration,
+                      curve: M3Motion.defaultEffects,
+                      opacity: dockOpacity,
+                      child: LauncherDock(
+                        slots: _dockSlots,
+                        accent: _effectiveAccent,
+                        onAppTap: _launchApp,
+                        onAppLongPress: _showDockSlotMenu,
+                        onEmptySlotTap: _pickDockApp,
                       ),
                     ),
                   ),
+                ),
 
-                // Bottom half / expandable app grid panel (moves down out of sight when Quick Settings or Ambient Mode is open)
+                // Expandable full-screen app drawer (slides up on swipe up)
                 AnimatedPositioned(
-                  duration: animDuration,
-                  curve: Curves.easeOutCubic,
+                  duration: _isDraggingDashboard ? Duration.zero : M3Motion.slowSpatial.duration,
+                  curve: M3Motion.slowSpatial,
                   left: 0,
                   right: 0,
                   bottom: panelBottom,
-                  height: targetPanelHeight,
-                  child: AppPanel(
-                    apps: _visibleApps,
-                    allApps: _allApps,
-                    metrics: metrics,
-                    dockHeight: dockHeight,
-                    isExpanded: _isPanelExpanded,
-                    isListMode: _drawerIsList,
-                    drawerMode: _drawerMode,
-                    onDrawerModeChanged: (mode) async {
-                      setState(() {
-                        _drawerMode = mode;
-                        _drawerIsList = mode == DrawerMode.list;
-                      });
-                      await _prefs?.setDrawerMode(mode);
-                    },
-                    autoFocusSearch: _autoFocusSearch,
-                    searchIncludesHidden: _searchIncludesHidden,
-                    isIdle: _isIdle,
-                    recentAppIds: _recentAppIds,
-                    sortMode: _sortMode,
-                    onSortModeChanged: (mode) async {
-                      setState(() => _sortMode = mode);
-                      await _prefs?.setSortMode(mode);
-                    },
-                    accent: _effectiveAccent,
-                    shortcuts: _allShortcuts,
-                    mediaPackageName: _mediaPackageName,
-                    mediaTitle: _mediaTitle,
-                    mediaArtist: _mediaArtist,
-                    mediaAlbumArt: _mediaAlbumArt,
-                    mediaIsPlaying: _mediaIsPlaying,
-                    onShortcutTap: (s) {
-                      _platform.startShortcut(s.packageName, s.id);
-                    },
-                    onExpandedChanged: (expanded) {
-                      if (_isQuickSettingsOpen) {
-                        _hideQuickSettings();
-                      }
-                      setState(() => _isPanelExpanded = expanded);
-                    },
-                    onAppTap: _launchApp,
-                    onAppLongPress: _showAppActions,
-                  ),
-                ),
-
-                // Dim scrim overlay when in ambient idle mode
-                Positioned.fill(
+                  height: maxH,
                   child: IgnorePointer(
+                    ignoring: !_isPanelExpanded && drawerT == 0.0,
                     child: AnimatedOpacity(
-                      duration: Duration(milliseconds: _isIdle ? 1200 : 300),
-                      curve: Curves.easeInOutCubic,
-                      opacity: _isIdle ? 0.42 : 0.0,
-                      child: const ColoredBox(color: Colors.black),
+                      duration: _isDraggingDashboard
+                          ? Duration.zero
+                          : M3Motion.defaultEffects.duration,
+                      curve: M3Motion.defaultEffects,
+                      opacity: (_isPanelExpanded || drawerT > 0.02) ? 1.0 : 0.0,
+                      child: AppPanel(
+                        apps: _visibleApps,
+                        allApps: _allApps,
+                        metrics: metrics,
+                        dockHeight: dockHeight,
+                        isExpanded: _isPanelExpanded,
+                        isListMode: _drawerIsList,
+                        drawerMode: _drawerMode,
+                        onDrawerModeChanged: (mode) async {
+                          setState(() {
+                            _drawerMode = mode;
+                            _drawerIsList = mode == DrawerMode.list;
+                          });
+                          await _prefs?.setDrawerMode(mode);
+                        },
+                        autoFocusSearch: _autoFocusSearch,
+                        searchIncludesHidden: _searchIncludesHidden,
+                        isIdle: _isIdle,
+                        recentAppIds: _recentAppIds,
+                        sortMode: _sortMode,
+                        onSortModeChanged: (mode) async {
+                          setState(() => _sortMode = mode);
+                          await _prefs?.setSortMode(mode);
+                        },
+                        accent: _effectiveAccent,
+                        shortcuts: _allShortcuts,
+                        mediaPackageName: _mediaPackageName,
+                        mediaTitle: _mediaTitle,
+                        mediaArtist: _mediaArtist,
+                        mediaAlbumArt: _mediaAlbumArt,
+                        mediaIsPlaying: _mediaIsPlaying,
+                        onShortcutTap: (s) {
+                          _platform.startShortcut(s.packageName, s.id);
+                        },
+                        onExpandedChanged: (expanded) {
+                          if (_isDashboardOpen) {
+                            _hideDashboard();
+                          }
+                          setState(() => _isPanelExpanded = expanded);
+                        },
+                        onAppTap: _launchApp,
+                        onAppLongPress: _showAppActions,
+                      ),
                     ),
                   ),
                 ),

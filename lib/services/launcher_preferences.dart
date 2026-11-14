@@ -17,12 +17,18 @@ enum AppSortMode {
   recent,
 }
 
+enum AmbientStyle {
+  pillsGlow,
+  bigClock,
+}
+
 class LauncherPreferences {
   LauncherPreferences(this._prefs);
 
   final SharedPreferences _prefs;
 
   static const _keyQuickApps = 'quick_app_ids';
+  static const _keyDockApps = 'dock_app_ids';
   static const _keyPinnedQuickTasks = 'pinned_quick_tasks';
   static const _keyRecentApps = 'recent_app_ids';
   static const _keySortMode = 'drawer_sort_mode';
@@ -39,6 +45,10 @@ class LauncherPreferences {
   static const _keyAutoFocusSearch = 'auto_focus_search';
   static const _keySearchIncludesHidden = 'search_includes_hidden';
   static const _keyAmbientIdleMode = 'ambient_idle_mode';
+  static const _keyAmbientTimeoutSeconds = 'ambient_timeout_seconds';
+  static const _keyAmbientStyle = 'ambient_style';
+  static const _keyAmbientLockEnabled = 'ambient_lock_enabled';
+  static const _keyAmbientLockPin = 'ambient_lock_pin';
   static const _keyProfileName = 'profile_name';
   static const _keyProfilePhoto = 'profile_photo_b64';
   static const _keyAmbientCustomText = 'ambient_custom_text';
@@ -58,6 +68,12 @@ class LauncherPreferences {
 
   Future<void> setQuickAppIds(List<String> ids) =>
       _prefs.setStringList(_keyQuickApps, ids);
+
+  List<String> get dockAppIds =>
+      _prefs.getStringList(_keyDockApps) ?? const [];
+
+  Future<void> setDockAppIds(List<String> ids) =>
+      _prefs.setStringList(_keyDockApps, ids);
 
   List<PinnedQuickTask> get pinnedQuickTasks {
     final raw = _prefs.getString(_keyPinnedQuickTasks);
@@ -219,6 +235,39 @@ class LauncherPreferences {
   Future<void> setAmbientIdleMode(bool value) =>
       _prefs.setBool(_keyAmbientIdleMode, value);
 
+  int get ambientTimeoutSeconds =>
+      (_prefs.getInt(_keyAmbientTimeoutSeconds) ?? 15).clamp(5, 300);
+
+  Future<void> setAmbientTimeoutSeconds(int seconds) =>
+      _prefs.setInt(_keyAmbientTimeoutSeconds, seconds.clamp(5, 300));
+
+  AmbientStyle get ambientStyle {
+    final name = _prefs.getString(_keyAmbientStyle);
+    return AmbientStyle.values.firstWhere(
+      (s) => s.name == name,
+      orElse: () => AmbientStyle.pillsGlow,
+    );
+  }
+
+  Future<void> setAmbientStyle(AmbientStyle style) =>
+      _prefs.setString(_keyAmbientStyle, style.name);
+
+  bool get ambientLockEnabled =>
+      _prefs.getBool(_keyAmbientLockEnabled) ?? false;
+
+  Future<void> setAmbientLockEnabled(bool value) =>
+      _prefs.setBool(_keyAmbientLockEnabled, value);
+
+  String? get ambientLockPin => _prefs.getString(_keyAmbientLockPin);
+
+  Future<void> setAmbientLockPin(String? pin) async {
+    if (pin == null || pin.isEmpty) {
+      await _prefs.remove(_keyAmbientLockPin);
+    } else {
+      await _prefs.setString(_keyAmbientLockPin, pin);
+    }
+  }
+
   String? get profileName => _prefs.getString(_keyProfileName);
 
   Future<void> setProfileName(String? value) async {
@@ -281,6 +330,7 @@ class LauncherPreferences {
       'version': 1,
       'exportDate': DateTime.now().toIso8601String(),
       'quickAppIds': quickAppIds,
+      'dockAppIds': dockAppIds,
       'pinnedQuickTasks': pinnedQuickTasks.map((t) => t.toJson()).toList(),
       'recentAppIds': recentAppIds,
       'sortMode': sortMode.name,
@@ -292,6 +342,10 @@ class LauncherPreferences {
       'autoFocusSearch': autoFocusSearch,
       'searchIncludesHidden': searchIncludesHidden,
       'ambientIdleMode': ambientIdleMode,
+      'ambientTimeoutSeconds': ambientTimeoutSeconds,
+      'ambientStyle': ambientStyle.name,
+      'ambientLockEnabled': ambientLockEnabled,
+      'ambientLockPin': ambientLockPin,
       'ambientCustomText': ambientCustomText,
       'profileName': profileName,
       'profilePhoto': _prefs.getString(_keyProfilePhoto),
@@ -314,6 +368,10 @@ class LauncherPreferences {
       if (data.containsKey('quickAppIds')) {
         final list = (data['quickAppIds'] as List?)?.map((e) => e.toString()).toList() ?? [];
         await setQuickAppIds(list);
+      }
+      if (data.containsKey('dockAppIds')) {
+        final list = (data['dockAppIds'] as List?)?.map((e) => e.toString()).toList() ?? [];
+        await setDockAppIds(list);
       }
       if (data.containsKey('pinnedQuickTasks')) {
         final rawList = data['pinnedQuickTasks'] as List? ?? const [];
@@ -360,6 +418,26 @@ class LauncherPreferences {
       }
       if (data.containsKey('ambientIdleMode')) {
         await setAmbientIdleMode(data['ambientIdleMode'] as bool? ?? true);
+      }
+      if (data.containsKey('ambientTimeoutSeconds')) {
+        final raw = data['ambientTimeoutSeconds'];
+        if (raw is int) {
+          await setAmbientTimeoutSeconds(raw);
+        }
+      }
+      if (data.containsKey('ambientStyle')) {
+        final styleName = data['ambientStyle'] as String?;
+        final style = AmbientStyle.values.firstWhere(
+          (s) => s.name == styleName,
+          orElse: () => AmbientStyle.pillsGlow,
+        );
+        await setAmbientStyle(style);
+      }
+      if (data.containsKey('ambientLockEnabled')) {
+        await setAmbientLockEnabled(data['ambientLockEnabled'] as bool? ?? false);
+      }
+      if (data.containsKey('ambientLockPin')) {
+        await setAmbientLockPin(data['ambientLockPin'] as String?);
       }
       if (data.containsKey('ambientCustomText')) {
         await setAmbientCustomText(data['ambientCustomText'] as String?);

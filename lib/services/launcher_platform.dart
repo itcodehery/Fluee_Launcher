@@ -125,24 +125,6 @@ class LauncherPlatform {
     }
   }
 
-  Future<bool> isAccessibilityServiceEnabled() async {
-    try {
-      final enabled = await _method.invokeMethod<bool>('isAccessibilityServiceEnabled');
-      return enabled ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<bool> openAccessibilitySettings() async {
-    try {
-      final res = await _method.invokeMethod<bool>('openAccessibilitySettings');
-      return res ?? true;
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<bool> isBluetoothConnected() async {
     try {
       final res = await _method.invokeMethod<bool>('isBluetoothConnected');
@@ -203,10 +185,11 @@ class LauncherPlatform {
     } catch (_) {}
   }
 
-  /// Opens the system power menu; false if the accessibility service is off.
-  Future<bool> showPowerMenu() async {
+  /// Dims or restores only the launcher window's screen brightness (no permission needed).
+  Future<bool> setWindowDim(bool dimmed) async {
     try {
-      return await _method.invokeMethod<bool>('showPowerMenu') ?? false;
+      return await _method.invokeMethod<bool>('setWindowDim', {'dimmed': dimmed}) ??
+          false;
     } catch (_) {
       return false;
     }
@@ -216,15 +199,6 @@ class LauncherPlatform {
   Future<bool> openNotifications() async {
     try {
       return await _method.invokeMethod<bool>('openNotifications') ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<bool> lockScreen() async {
-    try {
-      final res = await _method.invokeMethod<bool>('lockScreen');
-      return res ?? false;
     } catch (_) {
       return false;
     }

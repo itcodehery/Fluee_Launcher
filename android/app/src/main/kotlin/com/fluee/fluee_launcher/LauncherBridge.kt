@@ -282,30 +282,6 @@ class LauncherBridge(private val context: Context) :
                 }
             }
 
-            "isAccessibilityServiceEnabled" -> {
-                result.success(LauncherAccessibilityService.instance != null)
-            }
-
-            "openAccessibilitySettings" -> {
-                var opened = false
-                try {
-                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(intent)
-                    opened = true
-                } catch (_: Exception) {
-                    try {
-                        val fallback = Intent(Settings.ACTION_SETTINGS).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        context.startActivity(fallback)
-                        opened = true
-                    } catch (_: Exception) {}
-                }
-                result.success(opened)
-            }
-
             "getVolume" -> {
                 try {
                     val am = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
@@ -350,6 +326,25 @@ class LauncherBridge(private val context: Context) :
                     Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + context.packageName))
                 )
                 result.success(null)
+            }
+
+            "setWindowDim" -> {
+                val dimmed = call.argument<Boolean>("dimmed") ?: false
+                val activity = context as? android.app.Activity
+                if (activity != null) {
+                    mainHandler.post {
+                        val params = activity.window.attributes
+                        params.screenBrightness = if (dimmed) {
+                            0.04f
+                        } else {
+                            android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                        }
+                        activity.window.attributes = params
+                    }
+                    result.success(true)
+                } else {
+                    result.success(false)
+                }
             }
 
             "setBrightness" -> {
@@ -425,27 +420,16 @@ class LauncherBridge(private val context: Context) :
                 }
             }
 
-            "showPowerMenu" -> {
-                result.success(LauncherAccessibilityService.showPowerMenu())
-            }
-
             "openNotifications" -> {
-                var ok = LauncherAccessibilityService.openNotifications()
-                if (!ok) {
-                    try {
-                        val sbService = context.getSystemService("statusbar")
-                        val statusBarManager = Class.forName("android.app.StatusBarManager")
-                        val method = statusBarManager.getMethod("expandNotificationsPanel")
-                        method.invoke(sbService)
-                        ok = true
-                    } catch (_: Exception) {}
-                }
+                var ok = false
+                try {
+                    val sbService = context.getSystemService("statusbar")
+                    val statusBarManager = Class.forName("android.app.StatusBarManager")
+                    val method = statusBarManager.getMethod("expandNotificationsPanel")
+                    method.invoke(sbService)
+                    ok = true
+                } catch (_: Exception) {}
                 result.success(ok)
-            }
-
-            "lockScreen" -> {
-                val locked = LauncherAccessibilityService.lockScreen()
-                result.success(locked)
             }
 
             "isNotificationAccessGranted" -> {

@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/app_shortcut.dart';
 import '../services/launcher_platform.dart';
 import 'm3_spring_button.dart';
 
-/// Content shown inside the expanded clock card: collapse pill, greeting + avatar,
-/// battery + split time tiles, expressive brightness/volume sliders, and 3 quick actions.
+/// Top-half dashboard revealed when tapping the home clock: greeting + avatar,
+/// battery + split time tiles, expressive brightness/volume sliders, pinned app
+/// quick tasks, and 3 quick actions.
 class ProfileDashboard extends StatefulWidget {
   const ProfileDashboard({
     super.key,
@@ -16,6 +18,12 @@ class ProfileDashboard extends StatefulWidget {
     this.photo,
     this.batteryLevel,
     this.isCharging = false,
+    this.pinnedTasks = const [],
+    this.shortcuts = const [],
+    this.onTaskTap,
+    this.onTaskLongPress,
+    this.onAddTaskTap,
+    this.onPowerTap,
     this.onSettingsTap,
     this.onCollapse,
   });
@@ -26,6 +34,12 @@ class ProfileDashboard extends StatefulWidget {
   final Uint8List? photo;
   final int? batteryLevel;
   final bool isCharging;
+  final List<PinnedQuickTask> pinnedTasks;
+  final List<AppShortcut> shortcuts;
+  final ValueChanged<PinnedQuickTask>? onTaskTap;
+  final void Function(int index, PinnedQuickTask task)? onTaskLongPress;
+  final VoidCallback? onAddTaskTap;
+  final VoidCallback? onPowerTap;
   final VoidCallback? onSettingsTap;
   final VoidCallback? onCollapse;
 
@@ -123,6 +137,135 @@ class _ProfileDashboardState extends State<ProfileDashboard>
     return hour.toString().padLeft(2, '0');
   }
 
+  AppShortcut? _findShortcut(PinnedQuickTask task) {
+    for (final s in widget.shortcuts) {
+      if (s.packageName == task.packageName && s.id == task.shortcutId) {
+        return s;
+      }
+    }
+    return null;
+  }
+
+  Widget _buildPinnedTaskTile(
+    int index,
+    PinnedQuickTask task,
+    Color background,
+  ) {
+    final shortcut = _findShortcut(task);
+    final hasIcon = shortcut != null && shortcut.icon.isNotEmpty;
+
+    return Expanded(
+      child: M3SpringButton(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          widget.onCollapse?.call();
+          widget.onTaskTap?.call(task);
+        },
+        onLongPress: () {
+          HapticFeedback.mediumImpact();
+          widget.onTaskLongPress?.call(index, task);
+        },
+        pressedScale: 0.94,
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            children: [
+              if (hasIcon)
+                ColorFiltered(
+                  colorFilter: ColorFilter.mode(
+                    widget.accent,
+                    BlendMode.srcIn,
+                  ),
+                  child: Image.memory(
+                    shortcut.icon,
+                    width: 18,
+                    height: 18,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) => Icon(
+                      Icons.bolt_rounded,
+                      size: 18,
+                      color: widget.accent,
+                    ),
+                  ),
+                )
+              else
+                Icon(
+                  Icons.bolt_rounded,
+                  size: 18,
+                  color: widget.accent,
+                ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  task.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: GoogleFonts.plusJakartaSans(
+                    color: widget.accent,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddTaskTile(Color background) {
+    return Expanded(
+      child: M3SpringButton(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          widget.onAddTaskTap?.call();
+        },
+        pressedScale: 0.94,
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.add_rounded,
+                size: 18,
+                color: widget.accent.withValues(alpha: 0.7),
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  'Pin task',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    color: widget.accent.withValues(alpha: 0.7),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasName = widget.name != null && widget.name!.trim().isNotEmpty;
@@ -134,15 +277,15 @@ class _ProfileDashboardState extends State<ProfileDashboard>
     );
     final subSurface = Color.alphaBlend(
       widget.accent.withValues(alpha: 0.14),
-      const Color(0xFF0E1B15),
+      const Color(0xFF0A1610),
     );
     final batteryFillColor = Color.alphaBlend(
       widget.accent.withValues(alpha: 0.26),
       const Color(0xFF12261D),
     );
     final actionSurface = Color.alphaBlend(
-      widget.accent.withValues(alpha: 0.20),
-      const Color(0xFF10221A),
+      widget.accent.withValues(alpha: 0.14),
+      const Color(0xFF0A1610),
     );
 
     final batteryPct = _batteryLevel?.clamp(0, 100);
@@ -150,35 +293,12 @@ class _ProfileDashboardState extends State<ProfileDashboard>
     final hourStr = _formattedHour(context);
     final minStr = _now.minute.toString().padLeft(2, '0');
 
-    return SizedBox(
-      width: 296,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Top Collapse Pill Button
-          Center(
-            child: M3SpringButton(
-              onTap: widget.onCollapse ?? () {},
-              pressedScale: 0.90,
-              child: Container(
-                width: 48,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: pillTint,
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  Icons.keyboard_arrow_up_rounded,
-                  color: widget.accent,
-                  size: 18,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-
           // Greeting + Avatar Header
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -193,8 +313,8 @@ class _ProfileDashboardState extends State<ProfileDashboard>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.plusJakartaSans(
-                        color: Colors.white.withValues(alpha: 0.92),
-                        fontSize: 18,
+                        color: Colors.white.withValues(alpha: 0.94),
+                        fontSize: 20,
                         fontWeight: FontWeight.w600,
                         letterSpacing: -0.3,
                         height: 1.2,
@@ -207,7 +327,7 @@ class _ProfileDashboardState extends State<ProfileDashboard>
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.plusJakartaSans(
                         color: widget.accent,
-                        fontSize: 17,
+                        fontSize: 19,
                         fontWeight: FontWeight.w600,
                         letterSpacing: -0.3,
                         height: 1.2,
@@ -218,7 +338,7 @@ class _ProfileDashboardState extends State<ProfileDashboard>
               ),
               const SizedBox(width: 12),
               CircleAvatar(
-                radius: 28,
+                radius: 32,
                 backgroundColor: pillTint,
                 backgroundImage:
                     widget.photo != null ? MemoryImage(widget.photo!) : null,
@@ -229,12 +349,12 @@ class _ProfileDashboardState extends State<ProfileDashboard>
 
           // Battery Pill + Hour Circle + Minute Rounded Square
           SizedBox(
-            height: 52,
+            height: 54,
             child: Row(
               children: [
                 Expanded(
                   child: Container(
-                    height: 52,
+                    height: 54,
                     decoration: BoxDecoration(
                       color: subSurface,
                       borderRadius: BorderRadius.circular(16),
@@ -244,7 +364,7 @@ class _ProfileDashboardState extends State<ProfileDashboard>
                       builder: (context, constraints) {
                         final maxW = constraints.maxWidth;
                         final fillW = (maxW * batteryProgress)
-                            .clamp(38.0, maxW);
+                            .clamp(42.0, maxW);
                         return Stack(
                           alignment: Alignment.centerLeft,
                           children: [
@@ -252,14 +372,14 @@ class _ProfileDashboardState extends State<ProfileDashboard>
                               duration: const Duration(milliseconds: 300),
                               curve: Curves.easeOutCubic,
                               width: fillW,
-                              height: 52,
+                              height: 54,
                               decoration: BoxDecoration(
                                 color: batteryFillColor,
                                 borderRadius: BorderRadius.circular(14),
                               ),
                             ),
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              padding: const EdgeInsets.symmetric(horizontal: 14),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
@@ -274,7 +394,7 @@ class _ProfileDashboardState extends State<ProfileDashboard>
                                     batteryPct != null ? '$batteryPct%' : '--%',
                                     style: GoogleFonts.plusJakartaSans(
                                       color: widget.accent,
-                                      fontSize: 13.5,
+                                      fontSize: 14.5,
                                       fontWeight: FontWeight.w600,
                                       letterSpacing: -0.2,
                                     ),
@@ -288,50 +408,56 @@ class _ProfileDashboardState extends State<ProfileDashboard>
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: subSurface,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    hourStr,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: widget.accent,
-                      fontSize: 25,
-                      fontWeight: FontWeight.w300,
-                      letterSpacing: -0.5,
-                      height: 1.0,
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: widget.onCollapse,
+                  child: Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: subSurface,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      hourStr,
+                      style: GoogleFonts.plusJakartaSans(
+                        color: widget.accent,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w300,
+                        letterSpacing: -0.5,
+                        height: 1.0,
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: subSurface,
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    minStr,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: widget.accent,
-                      fontSize: 25,
-                      fontWeight: FontWeight.w300,
-                      letterSpacing: -0.5,
-                      height: 1.0,
+                GestureDetector(
+                  onTap: widget.onCollapse,
+                  child: Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: subSurface,
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      minStr,
+                      style: GoogleFonts.plusJakartaSans(
+                        color: widget.accent,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                        height: 1.0,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
 
           // Expressive Brightness & Volume Sliders
           _ExpressiveSlider(
@@ -351,7 +477,7 @@ class _ProfileDashboardState extends State<ProfileDashboard>
                 ),
               ),
             ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           _ExpressiveSlider(
             accent: widget.accent,
             icon: _volume == 0
@@ -363,20 +489,39 @@ class _ProfileDashboardState extends State<ProfileDashboard>
               widget.platform.setVolume(v);
             },
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 22),
 
-          // Bottom 3 Action Buttons: Power Menu, Settings, Notifications
+          // Pinned App Tasks Row (up to 2)
+          Row(
+            children: [
+              if (widget.pinnedTasks.isEmpty) ...[
+                _buildAddTaskTile(subSurface),
+                const SizedBox(width: 8),
+                _buildAddTaskTile(subSurface),
+              ] else ...[
+                _buildPinnedTaskTile(0, widget.pinnedTasks[0], subSurface),
+                const SizedBox(width: 8),
+                if (widget.pinnedTasks.length > 1)
+                  _buildPinnedTaskTile(1, widget.pinnedTasks[1], subSurface)
+                else
+                  _buildAddTaskTile(subSurface),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          // Bottom 3 Action Buttons: Power (Ambient), Settings, Notifications
           Row(
             children: [
               _DashboardActionButton(
                 icon: Icons.power_settings_new_rounded,
                 accent: widget.accent,
                 background: actionSurface,
-                tooltip: 'Power menu',
-                onTap: () async {
+                tooltip: 'Ambient mode',
+                onTap: () {
                   HapticFeedback.mediumImpact();
-                  final ok = await widget.platform.showPowerMenu();
-                  if (!ok) await widget.platform.openAccessibilitySettings();
+                  widget.onCollapse?.call();
+                  widget.onPowerTap?.call();
                 },
               ),
               const SizedBox(width: 8),
@@ -393,14 +538,14 @@ class _ProfileDashboardState extends State<ProfileDashboard>
               ),
               const SizedBox(width: 8),
               _DashboardActionButton(
-                icon: Icons.notifications_outlined,
+                icon: Icons.notifications_none_rounded,
                 accent: widget.accent,
                 background: actionSurface,
                 tooltip: 'Notifications',
                 onTap: () async {
                   HapticFeedback.lightImpact();
-                  final ok = await widget.platform.openNotifications();
-                  if (!ok) await widget.platform.openAccessibilitySettings();
+                  widget.onCollapse?.call();
+                  await widget.platform.openNotifications();
                 },
               ),
             ],

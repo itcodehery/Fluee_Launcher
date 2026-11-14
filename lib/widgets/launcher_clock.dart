@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'marquee_text.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../services/launcher_preferences.dart';
 import '../theme/m3_motion.dart';
 import 'm3_spring_button.dart';
 
@@ -33,6 +34,8 @@ class LauncherClock extends StatefulWidget {
     this.leadingIcon,
     this.onLeadingTap,
     this.isIdle = false,
+    this.ambientStyle = AmbientStyle.pillsGlow,
+    this.isCompactForKeypad = false,
     this.mediaTitle,
     this.mediaArtist,
     this.mediaIsPlaying = true,
@@ -54,6 +57,8 @@ class LauncherClock extends StatefulWidget {
   final IconData? leadingIcon;
   final VoidCallback? onLeadingTap;
   final bool isIdle;
+  final AmbientStyle ambientStyle;
+  final bool isCompactForKeypad;
   final String? mediaTitle;
   final String? mediaArtist;
   final bool mediaIsPlaying;
@@ -101,8 +106,9 @@ class _LauncherClockState extends State<LauncherClock> {
   void didUpdateWidget(LauncherClock oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      if (oldWidget.controller?._state == this)
+      if (oldWidget.controller?._state == this) {
         oldWidget.controller?._state = null;
+      }
       widget.controller?._state = this;
     }
     if (widget.isIdle && _expanded) {
@@ -189,82 +195,163 @@ class _LauncherClockState extends State<LauncherClock> {
     return months[_now.month - 1];
   }
 
-  String get _ambientFullDate {
-    const days = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
-    ];
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    final dayOfWeek = days[_now.weekday - 1];
-    final month = months[_now.month - 1];
-    return '$dayOfWeek, ${_now.day} $month';
+  String _formatHour2Digits(BuildContext context) {
+    final use24h = MediaQuery.alwaysUse24HourFormatOf(context);
+    final hour = use24h
+        ? _now.hour
+        : (_now.hour % 12 == 0 ? 12 : _now.hour % 12);
+    return hour.toString().padLeft(2, '0');
   }
 
-  Widget _buildAmbientClockView() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          _formatTime(context),
-          style: GoogleFonts.plusJakartaSans(
-            color: widget.accent,
-            fontSize: 58,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.8,
-            height: 1.0,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          _ambientFullDate,
-          style: GoogleFonts.plusJakartaSans(
-            color: Colors.white.withValues(alpha: 0.90),
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.3,
-          ),
-        ),
-        if (widget.customAmbientText != null &&
-            widget.customAmbientText!.trim().isNotEmpty) ...[
-          const SizedBox(height: 3),
-          Text(
-            widget.customAmbientText!.trim(),
-            style: GoogleFonts.plusJakartaSans(
-              color: widget.accent.withValues(alpha: 0.90),
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              letterSpacing: -0.1,
+  String _formatMinute2Digits() => _now.minute.toString().padLeft(2, '0');
+
+  Widget _buildAmbientGlow() {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Center(
+          child: OverflowBox(
+            minWidth: 520,
+            maxWidth: 520,
+            minHeight: 520,
+            maxHeight: 520,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.center,
+                  radius: 0.48,
+                  colors: [
+                    widget.accent.withValues(alpha: 0.24),
+                    widget.accent.withValues(alpha: 0.08),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.44, 1.0],
+                ),
+              ),
             ),
           ),
-        ],
-      ],
+        ),
+      ),
     );
+  }
+
+  Widget _buildAmbientView({
+    required Widget pillsRow,
+    required Color pillSurface,
+    required String displayDay,
+    required String displayMonth,
+  }) {
+    switch (widget.ambientStyle) {
+      case AmbientStyle.pillsGlow:
+        return Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            _buildAmbientGlow(),
+            pillsRow,
+          ],
+        );
+      case AmbientStyle.bigClock:
+        final compact = widget.isCompactForKeypad;
+        final screenWidth = MediaQuery.sizeOf(context).width;
+        final fullSize = (screenWidth * 0.44).clamp(150.0, 204.0);
+        final hourSize =
+            compact ? (screenWidth * 0.21).clamp(76.0, 102.0) : fullSize;
+        final minuteSize =
+            compact ? (screenWidth * 0.36).clamp(130.0, 168.0) : fullSize;
+        final outlinePaint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = compact ? 2.0 : 2.5
+          ..color = widget.accent;
+
+        return Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            _buildAmbientGlow(),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedDefaultTextStyle(
+                  duration: M3Motion.slowSpatial.duration,
+                  curve: M3Motion.slowSpatial,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: hourSize,
+                    fontWeight: FontWeight.w800,
+                    height: 0.85,
+                    letterSpacing: -3.0,
+                    foreground: outlinePaint,
+                  ),
+                  child: Text(_formatHour2Digits(context)),
+                ),
+                AnimatedDefaultTextStyle(
+                  duration: M3Motion.slowSpatial.duration,
+                  curve: M3Motion.slowSpatial,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: minuteSize,
+                    fontWeight: FontWeight.w800,
+                    height: 0.85,
+                    letterSpacing: -3.0,
+                    foreground: outlinePaint,
+                  ),
+                  child: Text(_formatMinute2Digits()),
+                ),
+                AnimatedContainer(
+                  duration: M3Motion.slowSpatial.duration,
+                  curve: M3Motion.slowSpatial,
+                  height: compact ? 14 : 24,
+                ),
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: pillSurface,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        displayDay,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: widget.accent,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                          height: 1.05,
+                        ),
+                      ),
+                      Text(
+                        displayMonth,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.1,
+                          height: 1.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Flat dark surface tone with zero borders
+    // Rich dark accent-tinted pill surface matching the redesigned UI
     final pillSurface = Color.alphaBlend(
-      widget.accent.withValues(alpha: 0.08),
-      const Color(0xFF222222),
+      widget.accent.withValues(alpha: 0.13),
+      const Color(0xFF0A120D),
+    );
+    final trackColor = Color.alphaBlend(
+      widget.accent.withValues(alpha: 0.18),
+      const Color(0xFF14221A),
     );
 
     final String displayDay;
@@ -284,7 +371,7 @@ class _LauncherClockState extends State<LauncherClock> {
     final hasMedia = widget.mediaTitle != null && widget.mediaTitle!.isNotEmpty;
 
     final idle = widget.isIdle;
-    final hideSides = idle || _expanded;
+    final hideSides = _expanded;
     // Material 3 Expressive springs: the bouncy "fast spatial" spring (damping 0.6,
     // stiffness 800) opens the card, while the gentler "default spatial" spring
     // (damping 0.8, stiffness 380) closes it so a 54px pill does not squash past itself.
@@ -302,8 +389,7 @@ class _LauncherClockState extends State<LauncherClock> {
         : const Duration(milliseconds: 180);
     final morphDur = sizeDur;
 
-    // Leading battery complication (hidden entirely once the card is expanded so the card
-    // always fits the screen instead of overflowing).
+    // Leading battery complication (kept visible in ambient pillsGlow mode).
     final leadingSide = AnimatedScale(
       scale: hideSides ? 0.0 : 1.0,
       duration: scaleDur,
@@ -316,15 +402,16 @@ class _LauncherClockState extends State<LauncherClock> {
             : Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: M3SpringButton(
-                  onTap:
-                      widget.onBatteryTap ??
-                      widget.onWeatherTap ??
-                      widget.onTap,
+                  onTap: idle
+                      ? () {}
+                      : (widget.onBatteryTap ??
+                          widget.onWeatherTap ??
+                          widget.onTap),
                   pressedScale: 0.88,
                   child: BatteryCircleComplication(
                     accent: widget.accent,
                     surface: pillSurface,
-                    border: const Color(0xFF333333),
+                    border: trackColor,
                     level: widget.batteryLevel,
                     isCharging: widget.isCharging,
                   ),
@@ -333,7 +420,7 @@ class _LauncherClockState extends State<LauncherClock> {
       ),
     );
 
-    // Trailing date complication.
+    // Trailing date complication (kept visible in ambient pillsGlow mode).
     final trailingSide = AnimatedScale(
       scale: hideSides ? 0.0 : 1.0,
       duration: scaleDur,
@@ -346,10 +433,11 @@ class _LauncherClockState extends State<LauncherClock> {
             : Padding(
                 padding: const EdgeInsets.only(left: 12),
                 child: M3SpringButton(
-                  onTap:
-                      widget.onDateTap ??
-                      widget.onLeadingTap ??
-                      widget.onSettingsTap,
+                  onTap: idle
+                      ? () {}
+                      : (widget.onDateTap ??
+                          widget.onLeadingTap ??
+                          widget.onSettingsTap),
                   pressedScale: 0.88,
                   child: Container(
                     width: 52,
@@ -403,20 +491,18 @@ class _LauncherClockState extends State<LauncherClock> {
 
           final dashboardMaxWidth = math.max(160.0, maxWidth - 40);
 
-          final Widget collapsedContent = idle
-              ? _buildAmbientClockView()
-              : AnimatedDefaultTextStyle(
-                  duration: morphDur,
-                  curve: springCurve,
-                  style: GoogleFonts.plusJakartaSans(
-                    color: widget.accent,
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.8,
-                    height: 1.0,
-                  ),
-                  child: Text(_formatTime(context)),
-                );
+          final Widget collapsedContent = AnimatedDefaultTextStyle(
+            duration: morphDur,
+            curve: springCurve,
+            style: GoogleFonts.plusJakartaSans(
+              color: widget.accent,
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.8,
+              height: 1.0,
+            ),
+            child: Text(_formatTime(context)),
+          );
 
           // When expanded the clock/time is removed entirely: the card shows only the
           // dashboard, and the chevron inside it is the sole way to collapse it.
@@ -504,13 +590,13 @@ class _LauncherClockState extends State<LauncherClock> {
             duration: morphDur,
             curve: springCurve,
             padding: EdgeInsets.symmetric(
-              horizontal: _expanded ? 20 : (idle ? 20 : 22),
-              vertical: _expanded ? 14 : (idle ? 0 : 10),
+              horizontal: _expanded ? 20 : 22,
+              vertical: _expanded ? 14 : 10,
             ),
             decoration: BoxDecoration(
-              color: idle ? Colors.transparent : pillSurface,
+              color: pillSurface,
               borderRadius: BorderRadius.circular(
-                _expanded ? 36 : (idle ? 24 : 30),
+                _expanded ? 36 : 30,
               ),
             ),
             child: cardContent,
@@ -520,25 +606,60 @@ class _LauncherClockState extends State<LauncherClock> {
           // body is inert and only the dashboard's chevron collapses the card.
           if (!_expanded) {
             clockCard = M3SpringButton(
-              onTap: widget.dashboard == null ? widget.onTap : _onPillTap,
+              onTap: idle
+                  ? () {}
+                  : (widget.dashboard == null ? widget.onTap : _onPillTap),
               pressedScale: 0.94,
               child: clockCard,
             );
           }
 
+          final pillsRow = Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (!_expanded) leadingSide,
+              Flexible(child: clockCard),
+              if (!_expanded) trailingSide,
+            ],
+          );
+
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  if (!_expanded) leadingSide,
-                  Flexible(child: clockCard),
-                  if (!_expanded) trailingSide,
-                ],
+              AnimatedOpacity(
+                opacity: (idle && !widget.isCompactForKeypad) ? 0.78 : 1.0,
+                duration: M3Motion.slowEffects.duration,
+                curve: M3Motion.slowEffects,
+                child: AnimatedSwitcher(
+                  duration: M3Motion.slowEffects.duration,
+                  switchInCurve: M3Motion.slowEffects,
+                  switchOutCurve: M3Motion.slowEffects,
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(
+                      scale: Tween<double>(begin: 0.94, end: 1.0)
+                          .animate(animation),
+                      child: child,
+                    ),
+                  ),
+                  child: idle
+                      ? KeyedSubtree(
+                          key: ValueKey('ambient-${widget.ambientStyle.name}'),
+                          child: _buildAmbientView(
+                            pillsRow: pillsRow,
+                            pillSurface: pillSurface,
+                            displayDay: displayDay,
+                            displayMonth: displayMonth,
+                          ),
+                        )
+                      : KeyedSubtree(
+                          key: const ValueKey('home-clock-pills'),
+                          child: pillsRow,
+                        ),
+                ),
               ),
 
               // Now Playing Pill below the clock (hidden while the card is expanded)

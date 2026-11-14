@@ -3,18 +3,21 @@ import 'dart:math' as math;
 import 'package:flutter/animation.dart';
 import 'package:flutter/physics.dart';
 
-/// Material 3 Expressive motion.
+/// Material 3 Expressive motion system.
 ///
-/// Spring tokens mirror `ExpressiveMotionTokens` from `androidx.compose.material3`:
-///  * fast spatial:    damping ratio 0.6, stiffness 800 (bouncy, small bounds changes)
-///  * default spatial: damping ratio 0.8, stiffness 380
-///  * default effects: damping ratio 1.0, stiffness 1600 (alpha/color, no overshoot)
+/// Follows the M3 Motion spring physics specification
+/// (https://m3.material.io/styles/motion/overview/how-it-works):
+/// - **Spatial** springs animate position, size, scale, and bounds (with controlled overshoot).
+/// - **Effects** springs animate opacity, color, and elevation (critically damped, ratio 1.0).
+/// - **Expressive** tokens are used for hero moments (dashboard, ambient lock, dock focus);
+///   **Standard** tokens are used for subtle utilitarian transitions.
 ///
 /// Flutter describes springs with a damping coefficient instead of a ratio:
 /// `damping = 2 * ratio * sqrt(mass * stiffness)`.
 class M3Motion {
   M3Motion._();
 
+  // --- Expressive Spatial Springs ---
   static const SpringDescription fastSpatialSpring = SpringDescription(
     mass: 1.0,
     stiffness: 800.0,
@@ -23,19 +26,68 @@ class M3Motion {
 
   static const SpringDescription defaultSpatialSpring = SpringDescription(
     mass: 1.0,
-    stiffness: 380.0,
-    damping: 31.19, // 2 * 0.8 * sqrt(380)
+    stiffness: 260.0,
+    damping: 25.80, // 2 * 0.8 * sqrt(260)
+  );
+
+  static const SpringDescription slowSpatialSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 150.0,
+    damping: 19.60, // 2 * 0.8 * sqrt(150)
+  );
+
+  // --- Effects Springs (critically damped, no overshoot) ---
+  static const SpringDescription fastEffectsSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 3800.0,
+    damping: 123.29, // 2 * 1.0 * sqrt(3800)
   );
 
   static const SpringDescription defaultEffectsSpring = SpringDescription(
     mass: 1.0,
-    stiffness: 1600.0,
-    damping: 80.0, // 2 * 1.0 * sqrt(1600)
+    stiffness: 900.0,
+    damping: 60.0, // 2 * 1.0 * sqrt(900)
+  );
+
+  static const SpringDescription slowEffectsSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 450.0,
+    damping: 42.43, // 2 * 1.0 * sqrt(450)
+  );
+
+  // --- Standard Spatial Springs ---
+  static const SpringDescription standardFastSpatialSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 1400.0,
+    damping: 67.35, // 2 * 0.9 * sqrt(1400)
+  );
+
+  static const SpringDescription standardDefaultSpatialSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 700.0,
+    damping: 47.62, // 2 * 0.9 * sqrt(700)
+  );
+
+  static const SpringDescription standardSlowSpatialSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 300.0,
+    damping: 31.18, // 2 * 0.9 * sqrt(300)
   );
 
   static final SpringCurve fastSpatial = SpringCurve(fastSpatialSpring);
   static final SpringCurve defaultSpatial = SpringCurve(defaultSpatialSpring);
+  static final SpringCurve slowSpatial = SpringCurve(slowSpatialSpring);
+
+  static final SpringCurve fastEffects = SpringCurve(fastEffectsSpring);
   static final SpringCurve defaultEffects = SpringCurve(defaultEffectsSpring);
+  static final SpringCurve slowEffects = SpringCurve(slowEffectsSpring);
+
+  static final SpringCurve standardFastSpatial =
+      SpringCurve(standardFastSpatialSpring);
+  static final SpringCurve standardDefaultSpatial =
+      SpringCurve(standardDefaultSpatialSpring);
+  static final SpringCurve standardSlowSpatial =
+      SpringCurve(standardSlowSpatialSpring);
 }
 
 /// A [Curve] sampled from a real spring simulation, so implicit animations

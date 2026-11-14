@@ -1,36 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../models/app_item.dart';
 import '../models/app_shortcut.dart';
 import '../services/launcher_preferences.dart';
 import '../theme/launcher_colors.dart';
+import '../theme/m3_motion.dart';
 import 'app_tile.dart';
 import 'm3_spring_button.dart';
 
 const double dragHandleHeight = 36.0;
 
-const ColorFilter _desaturatedFilter = ColorFilter.matrix(<double>[
-  0.2126,
-  0.7152,
-  0.0722,
-  0,
-  0,
-  0.2126,
-  0.7152,
-  0.0722,
-  0,
-  0,
-  0.2126,
-  0.7152,
-  0.0722,
-  0,
-  0,
-  0,
-  0,
-  0,
-  1,
-  0,
-]);
+class _AppCategory {
+  const _AppCategory({required this.name, required this.apps});
+  final String name;
+  final List<AppItem> apps;
+}
 
 class AppPanel extends StatefulWidget {
   const AppPanel({
@@ -96,7 +81,11 @@ class _AppPanelState extends State<AppPanel> {
   late final ScrollController _scrollController;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+
   String _query = '';
+  bool _isCategorized = true;
+  bool _isSearchOpen = false;
+  String? _expandedCategory;
   double _dragDownDistance = 0;
   bool _expandedTriggeredThisDrag = false;
 
@@ -104,6 +93,9 @@ class _AppPanelState extends State<AppPanel> {
   void initState() {
     super.initState();
     _scrollController = ScrollController();
+    if (widget.isExpanded && widget.autoFocusSearch) {
+      _isSearchOpen = true;
+    }
     _searchFocusNode.addListener(() {
       if (mounted) setState(() {});
     });
@@ -112,18 +104,18 @@ class _AppPanelState extends State<AppPanel> {
   @override
   void didUpdateWidget(AppPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // When expanding, auto-focus search if preference is enabled
     if (!oldWidget.isExpanded && widget.isExpanded && widget.autoFocusSearch) {
+      setState(() => _isSearchOpen = true);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !widget.isExpanded) return;
         _searchFocusNode.requestFocus();
       });
     }
 
-    // When collapsing, reset scroll position to top and clear search safely post-frame
     if (oldWidget.isExpanded && !widget.isExpanded) {
-      if (_query.isNotEmpty) {
+      if (_query.isNotEmpty || _isSearchOpen) {
         _query = '';
+        _isSearchOpen = false;
         _searchController.clear();
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -154,41 +146,26 @@ class _AppPanelState extends State<AppPanel> {
 
     List<AppItem> result;
     if (_query.isEmpty) {
-      if (widget.sortMode == AppSortMode.recent) {
-        result = List<AppItem>.from(pool);
-      } else {
-        // Pin recently used apps right at the start of the drawer when not searching
-        final recentApps = _recentApps;
-        final recentSet = recentApps.map((a) => a.id).toSet();
-        final remaining = pool.where((a) => !recentSet.contains(a.id)).toList();
-
-        if (widget.sortMode == AppSortMode.az) {
-          remaining.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
-        } else if (widget.sortMode == AppSortMode.za) {
-          remaining.sort((a, b) => b.label.toLowerCase().compareTo(a.label.toLowerCase()));
-        }
-        result = [...recentApps, ...remaining];
-        return result;
-      }
+      result = List<AppItem>.from(pool);
     } else {
       result = pool
-          .where(
-            (a) => a.label.toLowerCase().contains(_query),
-          )
+          .where((a) => a.label.toLowerCase().contains(_query))
           .toList();
     }
 
     switch (widget.sortMode) {
       case AppSortMode.az:
-        result.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
-        break;
+        result.sort(
+          (a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()),
+        );
       case AppSortMode.za:
-        result.sort((a, b) => b.label.toLowerCase().compareTo(a.label.toLowerCase()));
-        break;
+        result.sort(
+          (a, b) => b.label.toLowerCase().compareTo(a.label.toLowerCase()),
+        );
       case AppSortMode.recent:
         final recentOrder = {
           for (var i = 0; i < widget.recentAppIds.length; i++)
-            widget.recentAppIds[i]: i
+            widget.recentAppIds[i]: i,
         };
         result.sort((a, b) {
           final posA = recentOrder[a.id] ?? 999999;
@@ -196,7 +173,6 @@ class _AppPanelState extends State<AppPanel> {
           if (posA != posB) return posA.compareTo(posB);
           return a.label.toLowerCase().compareTo(b.label.toLowerCase());
         });
-        break;
     }
     return result;
   }
@@ -210,663 +186,719 @@ class _AppPanelState extends State<AppPanel> {
     }).take(6).toList();
   }
 
-  List<AppItem> get _recentApps {
-    if (widget.recentAppIds.isEmpty) return const [];
-    final byId = {for (final a in widget.allApps.isNotEmpty ? widget.allApps : widget.apps) a.id: a};
-    return widget.recentAppIds
-        .map((id) => byId[id])
-        .whereType<AppItem>()
-        .take(8)
-        .toList();
+  String _categoryForApp(AppItem app) {
+    final key = '${app.packageName} ${app.label}'.toLowerCase();
+    if (_matchesAny(key, const [
+      'setting',
+      'files',
+      'clock',
+      'alarm',
+      'calculator',
+      'calendar',
+      'vending',
+      'play store',
+      'system',
+      'security',
+      'battery',
+    ])) {
+      return 'Settings';
+    }
+    if (_matchesAny(key, const [
+      'contact',
+      'dialer',
+      'phone',
+      'sms',
+      'messaging',
+      'messages',
+      'whatsapp',
+      'telegram',
+      'signal',
+      'discord',
+      'slack',
+      'teams',
+      'zoom',
+      'meet',
+    ])) {
+      return 'Contacts';
+    }
+    if (_matchesAny(key, const [
+      'chrome',
+      'browser',
+      'firefox',
+      'brave',
+      'edge',
+      'opera',
+      'duckduckgo',
+      'maps',
+      'earth',
+      'search',
+      'wikipedia',
+      'reddit',
+    ])) {
+      return 'Internet';
+    }
+    if (_matchesAny(key, const [
+      'game',
+      'unity',
+      'roblox',
+      'minecraft',
+      'chess',
+      'puzzle',
+      'arcade',
+      'pubg',
+      'clash',
+    ])) {
+      return 'Games';
+    }
+    if (_matchesAny(key, const [
+      'youtube',
+      'spotify',
+      'music',
+      'photo',
+      'gallery',
+      'camera',
+      'vlc',
+      'netflix',
+      'twitch',
+      'podcast',
+      'audio',
+      'video',
+      'media',
+    ])) {
+      return 'Media';
+    }
+    if (_matchesAny(key, const [
+      'mail',
+      'gmail',
+      'outlook',
+      'docs',
+      'sheets',
+      'drive',
+      'keep',
+      'note',
+      'task',
+      'todo',
+      'notion',
+      'obsidian',
+    ])) {
+      return 'Productivity';
+    }
+    return 'Utilities';
   }
 
-  DrawerMode get _effectiveMode =>
-      widget.drawerMode ??
-      (widget.isListMode ? DrawerMode.list : DrawerMode.grid);
+  bool _matchesAny(String haystack, List<String> needles) {
+    for (final n in needles) {
+      if (haystack.contains(n)) return true;
+    }
+    return false;
+  }
 
-  Widget _buildAppList(List<AppItem> displayApps, double listBottomPadding) {
-    // While searching, results stack up from just above the search bar.
-    final reverse = _query.isNotEmpty;
-    switch (_effectiveMode) {
-      case DrawerMode.list:
-        return ListView.builder(
-          reverse: reverse,
-          controller: _scrollController,
-          itemExtent: 64, // performance optimization for 120Hz smooth scrolling
-          padding: EdgeInsets.only(
-            left: TileMetrics.margin + 6,
-            right: TileMetrics.margin + 6,
-            top: 4,
-            bottom: listBottomPadding,
+  List<_AppCategory> _buildCategories(List<AppItem> apps) {
+    const order = [
+      'Settings',
+      'Contacts',
+      'Internet',
+      'Games',
+      'Media',
+      'Productivity',
+      'Utilities',
+    ];
+    final buckets = <String, List<AppItem>>{};
+    for (final app in apps) {
+      final cat = _categoryForApp(app);
+      (buckets[cat] ??= <AppItem>[]).add(app);
+    }
+    final categories = <_AppCategory>[];
+    for (final name in order) {
+      final list = buckets[name];
+      if (list != null && list.isNotEmpty) {
+        categories.add(_AppCategory(name: name, apps: list));
+      }
+    }
+    return categories;
+  }
+
+  Widget _buildAppIconTile(AppItem app, Color tileSurface) {
+    return M3SpringButton(
+      key: ValueKey('drawer-tile-${app.id}'),
+      onTap: () => widget.onAppTap(app),
+      onLongPress: () => widget.onAppLongPress(app),
+      pressedScale: 0.90,
+      child: Tooltip(
+        message: app.label,
+        child: Container(
+          decoration: BoxDecoration(
+            color: tileSurface,
+            borderRadius: BorderRadius.circular(18),
           ),
-          physics: widget.isExpanded
-              ? const BouncingScrollPhysics(
-                  parent: AlwaysScrollableScrollPhysics(),
-                )
-              : const NeverScrollableScrollPhysics(),
-          itemCount: displayApps.length,
-          itemBuilder: (context, index) {
-            final app = displayApps[index];
-            return M3SpringButton(
-              key: ValueKey('${app.id}_$index'),
-              onTap: () => widget.onAppTap(app),
-              onLongPress: () => widget.onAppLongPress(app),
-              pressedScale: 0.97,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 48,
-                      height: 48,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: LauncherColors.tileBackground,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Center(
-                          child: FractionallySizedBox(
-                            widthFactor: 0.65,
-                            heightFactor: 0.65,
-                            child: app.icon.isNotEmpty
-                                ? (app.isMonochrome
-                                      ? Image.memory(
-                                          app.icon,
-                                          fit: BoxFit.contain,
-                                          gaplessPlayback: true,
-                                          errorBuilder:
-                                              (context, error, stackTrace) =>
-                                                  const Icon(
-                                                    Icons.apps,
-                                                    color:
-                                                        LauncherColors.tileIcon,
-                                                    size: 22,
-                                                  ),
-                                          color: LauncherColors.tileIcon,
-                                          colorBlendMode: BlendMode.srcIn,
-                                        )
-                                      : ColorFiltered(
-                                          colorFilter: _desaturatedFilter,
-                                          child: Image.memory(
-                                            app.icon,
-                                            fit: BoxFit.contain,
-                                            gaplessPlayback: true,
-                                            errorBuilder:
-                                                (context, error, stackTrace) =>
-                                                    const Icon(
-                                                      Icons.apps,
-                                                      color: LauncherColors
-                                                          .tileIcon,
-                                                      size: 22,
-                                                    ),
-                                          ),
-                                        ))
-                                : const Icon(
-                                    Icons.apps,
-                                    color: LauncherColors.tileIcon,
-                                    size: 22,
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Text(
-                        app.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-
-      case DrawerMode.grid:
-        final hasActiveMedia = widget.mediaPackageName != null &&
-            widget.mediaPackageName!.isNotEmpty &&
-            widget.mediaTitle != null &&
-            widget.mediaTitle!.isNotEmpty &&
-            displayApps.any((a) => a.packageName == widget.mediaPackageName);
-
-        if (!hasActiveMedia) {
-          return GridView.builder(
-            reverse: reverse,
-            controller: _scrollController,
-            padding: EdgeInsets.only(
-              left: TileMetrics.margin,
-              right: TileMetrics.margin,
-              top: 4,
-              bottom: listBottomPadding,
-            ),
-            physics: widget.isExpanded
-                ? const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
-                  )
-                : const NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: TileMetrics.columns,
-              mainAxisSpacing: TileMetrics.gap,
-              crossAxisSpacing: TileMetrics.gap,
-            ),
-            itemCount: displayApps.length,
-            itemBuilder: (context, index) {
-              final app = displayApps[index];
-              return AppTile(
-                key: ValueKey('${app.id}_$index'),
-                app: app,
-                background: widget.isIdle
-                    ? Colors.transparent
-                    : LauncherColors.tileBackground,
-                transparentBackground: widget.isIdle,
-                iconTint: LauncherColors.tileIcon,
-                borderRadius: widget.metrics.borderRadius,
-                onTap: () => widget.onAppTap(app),
-                onLongPress: () => widget.onAppLongPress(app),
-              );
-            },
-          );
-        }
-
-        // Pack grid items into 4-column rows where the playing media app spans 2 columns.
-        final rows = <List<({AppItem app, bool isMedia, int index})>>[];
-        var currentRow = <({AppItem app, bool isMedia, int index})>[];
-        var usedCols = 0;
-        var matchedMediaApp = false;
-        for (var i = 0; i < displayApps.length; i++) {
-          final app = displayApps[i];
-          final isMedia = !matchedMediaApp &&
-              app.packageName == widget.mediaPackageName;
-          if (isMedia) matchedMediaApp = true;
-          final span = isMedia ? 2 : 1;
-          if (usedCols + span > TileMetrics.columns) {
-            rows.add(currentRow);
-            currentRow = [];
-            usedCols = 0;
-          }
-          currentRow.add((app: app, isMedia: isMedia, index: i));
-          usedCols += span;
-          if (usedCols >= TileMetrics.columns) {
-            rows.add(currentRow);
-            currentRow = [];
-            usedCols = 0;
-          }
-        }
-        if (currentRow.isNotEmpty) {
-          rows.add(currentRow);
-        }
-
-        final tileSize = widget.metrics.tileSize;
-        return ListView.builder(
-          reverse: reverse,
-          controller: _scrollController,
-          padding: EdgeInsets.only(
-            left: TileMetrics.margin,
-            right: TileMetrics.margin,
-            top: 4,
-            bottom: listBottomPadding,
-          ),
-          physics: widget.isExpanded
-              ? const BouncingScrollPhysics(
-                  parent: AlwaysScrollableScrollPhysics(),
-                )
-              : const NeverScrollableScrollPhysics(),
-          itemCount: rows.length,
-          itemBuilder: (context, rowIndex) {
-            final row = rows[rowIndex];
-            final isLast = rowIndex == rows.length - 1;
-            return Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : TileMetrics.gap),
-              child: Row(
-                children: [
-                  for (var col = 0; col < row.length; col++) ...[
-                    if (col > 0) const SizedBox(width: TileMetrics.gap),
-                    if (row[col].isMedia)
-                      SizedBox(
-                        width: tileSize * 2 + TileMetrics.gap,
-                        height: tileSize,
-                        child: MediaAppTile(
-                          key: ValueKey('media_${row[col].app.id}_${row[col].index}'),
-                          app: row[col].app,
-                          tileSize: tileSize,
-                          title: widget.mediaTitle!,
-                          artist: widget.mediaArtist ?? '',
-                          albumArt: widget.mediaAlbumArt,
-                          accent: widget.accent,
-                          isPlaying: widget.mediaIsPlaying,
-                          background: widget.isIdle
-                              ? Colors.transparent
-                              : LauncherColors.tileBackground,
-                          borderRadius: widget.metrics.borderRadius,
-                          transparentBackground: widget.isIdle,
-                          onTap: () => widget.onAppTap(row[col].app),
-                          onLongPress: () => widget.onAppLongPress(row[col].app),
+          alignment: Alignment.center,
+          child: FractionallySizedBox(
+            widthFactor: 0.54,
+            heightFactor: 0.54,
+            child: app.icon.isNotEmpty
+                ? (app.isMonochrome
+                    ? Image.memory(
+                        app.icon,
+                        fit: BoxFit.contain,
+                        gaplessPlayback: true,
+                        color: widget.accent,
+                        colorBlendMode: BlendMode.srcIn,
+                        errorBuilder: (_, _, _) => Icon(
+                          Icons.apps_rounded,
+                          color: widget.accent,
+                          size: 26,
                         ),
                       )
-                    else
-                      SizedBox(
-                        width: tileSize,
-                        height: tileSize,
-                        child: AppTile(
-                          key: ValueKey('${row[col].app.id}_${row[col].index}'),
-                          app: row[col].app,
-                          background: widget.isIdle
-                              ? Colors.transparent
-                              : LauncherColors.tileBackground,
-                          transparentBackground: widget.isIdle,
-                          iconTint: LauncherColors.tileIcon,
-                          borderRadius: widget.metrics.borderRadius,
-                          onTap: () => widget.onAppTap(row[col].app),
-                          onLongPress: () => widget.onAppLongPress(row[col].app),
+                    : ColorFiltered(
+                        colorFilter: const ColorFilter.matrix(<double>[
+                          0.2126, 0.7152, 0.0722, 0, 0,
+                          0.2126, 0.7152, 0.0722, 0, 0,
+                          0.2126, 0.7152, 0.0722, 0, 0,
+                          0,      0,      0,      1, 0,
+                        ]),
+                        child: Image.memory(
+                          app.icon,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                          errorBuilder: (_, _, _) => Icon(
+                            Icons.apps_rounded,
+                            color: widget.accent,
+                            size: 26,
+                          ),
+                        ),
+                      ))
+                : Icon(
+                    Icons.apps_rounded,
+                    color: widget.accent,
+                    size: 26,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategorizedBody(
+    List<AppItem> apps,
+    Color cardSurface,
+    Color tileSurface,
+  ) {
+    final categories = _buildCategories(apps);
+    return ListView.builder(
+      controller: _scrollController,
+      padding: EdgeInsets.fromLTRB(
+        14,
+        0,
+        14,
+        widget.dockHeight + 88,
+      ),
+      physics: widget.isExpanded
+          ? const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics())
+          : const NeverScrollableScrollPhysics(),
+      itemCount: categories.length,
+      itemBuilder: (context, index) {
+        final category = categories[index];
+        final isCategoryExpanded = _expandedCategory == category.name;
+
+        return GestureDetector(
+          onTap: () {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _expandedCategory = isCategoryExpanded ? null : category.name;
+            });
+          },
+          child: AnimatedContainer(
+            duration: M3Motion.defaultSpatial.duration,
+            curve: M3Motion.defaultSpatial,
+            padding: EdgeInsets.fromLTRB(
+              20,
+              isCategoryExpanded ? 18 : 20,
+              20,
+              isCategoryExpanded ? 12 : 20,
+            ),
+            decoration: BoxDecoration(
+              color: cardSurface,
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: AnimatedSize(
+              duration: M3Motion.defaultSpatial.duration,
+              curve: M3Motion.defaultSpatial,
+              alignment: Alignment.topCenter,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(
+                        category.name,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: widget.accent,
+                          fontSize: isCategoryExpanded ? 17 : 28,
+                          fontWeight: isCategoryExpanded
+                              ? FontWeight.w600
+                              : FontWeight.w700,
+                          letterSpacing: -0.5,
+                          height: 1.15,
                         ),
                       ),
+                      Text(
+                        '${category.apps.length}',
+                        style: GoogleFonts.plusJakartaSans(
+                          color: widget.accent.withValues(alpha: 0.78),
+                          fontSize: isCategoryExpanded ? 13.5 : 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (isCategoryExpanded) ...[
+                    const SizedBox(height: 16),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 4,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                      ),
+                      itemCount: category.apps.length,
+                      itemBuilder: (context, appIdx) => _buildAppIconTile(
+                        category.apps[appIdx],
+                        tileSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Center(
+                      child: Icon(
+                        Icons.keyboard_arrow_up_rounded,
+                        color: widget.accent,
+                        size: 20,
+                      ),
+                    ),
                   ],
                 ],
               ),
-            );
-          },
+            ),
+          ),
         );
-    }
+      },
+    );
+  }
+
+  Widget _buildAllAppsBody(
+    List<AppItem> apps,
+    Color cardSurface,
+    Color tileSurface,
+  ) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: cardSurface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          if (_isSearchOpen) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: TextField(
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                onChanged: (value) =>
+                    setState(() => _query = value.trim().toLowerCase()),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+                cursorColor: widget.accent,
+                decoration: InputDecoration(
+                  hintText: 'Search apps...',
+                  hintStyle: TextStyle(
+                    color: widget.accent.withValues(alpha: 0.50),
+                    fontSize: 15,
+                  ),
+                  prefixIcon: Icon(
+                    Icons.search_rounded,
+                    color: widget.accent,
+                    size: 20,
+                  ),
+                  suffixIcon: _query.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(
+                            Icons.clear_rounded,
+                            color: Colors.white54,
+                            size: 18,
+                          ),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _query = '');
+                          },
+                        )
+                      : null,
+                  isDense: true,
+                  filled: true,
+                  fillColor: tileSurface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+            if (_query.isNotEmpty && _matchingShortcuts.isNotEmpty)
+              SizedBox(
+                height: 36,
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _matchingShortcuts.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final s = _matchingShortcuts[index];
+                    return M3SpringButton(
+                      onTap: () => widget.onShortcutTap?.call(s),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: tileSurface,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.bolt_rounded,
+                              size: 15,
+                              color: widget.accent,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              s.displayLabel,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+          Expanded(
+            child: GridView.builder(
+              controller: _scrollController,
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                widget.dockHeight + 88,
+              ),
+              physics: widget.isExpanded
+                  ? const BouncingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics(),
+                    )
+                  : const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+              ),
+              itemCount: apps.length,
+              itemBuilder: (context, index) =>
+                  _buildAppIconTile(apps[index], tileSurface),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModeToggleButton({
+    required IconData icon,
+    required bool active,
+    required Color inactiveSurface,
+    required VoidCallback onTap,
+  }) {
+    return M3SpringButton(
+      onTap: onTap,
+      pressedScale: 0.90,
+      child: AnimatedContainer(
+        duration: M3Motion.fastEffects.duration,
+        curve: M3Motion.fastEffects,
+        width: 42,
+        height: 36,
+        decoration: BoxDecoration(
+          color: active ? widget.accent : inactiveSurface,
+          borderRadius: BorderRadius.circular(11),
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          icon,
+          size: 20,
+          color: active ? LauncherColors.readableOn(widget.accent) : widget.accent,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final displayApps = _sortedAndFilteredApps;
-    final listBottomPadding = widget.isExpanded
-        ? (widget.dockHeight + 48 + 24)
-        : (widget.dockHeight + TileMetrics.gap);
+    final cardSurface = Color.alphaBlend(
+      widget.accent.withValues(alpha: 0.12),
+      const Color(0xFF0A120D),
+    );
+    final tileSurface = Color.alphaBlend(
+      widget.accent.withValues(alpha: 0.16),
+      const Color(0xFF132219),
+    );
 
-    return Column(
-      children: [
-        _PanelHandle(
-          onToggle: () => widget.onExpandedChanged(!widget.isExpanded),
-          onDragUp: () {},
-          onDragDown: () => widget.onExpandedChanged(false),
-        ),
+    final showAllApps = !_isCategorized || _isSearchOpen;
 
-        Expanded(
-          child: Listener(
-            onPointerDown: (_) {
-              _dragDownDistance = 0;
-              _expandedTriggeredThisDrag = false;
-            },
-            onPointerMove: (event) {
-              if (_expandedTriggeredThisDrag) return;
-              if (widget.isExpanded) {
-                // If at the top of the grid and dragging downward -> collapse
-                final isAtTop =
-                    !_scrollController.hasClients ||
-                    _scrollController.offset <= 0;
-                if (isAtTop && event.delta.dy > 0) {
-                  _dragDownDistance += event.delta.dy;
-                  if (_dragDownDistance > 24) {
-                    _expandedTriggeredThisDrag = true;
-                    widget.onExpandedChanged(false);
-                  }
-                } else {
-                  _dragDownDistance = 0;
-                }
-              }
-            },
-            onPointerUp: (_) {
-              _dragDownDistance = 0;
-              _expandedTriggeredThisDrag = false;
-            },
-            onPointerCancel: (_) {
-              _dragDownDistance = 0;
-              _expandedTriggeredThisDrag = false;
-            },
-            child: NotificationListener<ScrollNotification>(
-              onNotification: (notification) {
-                if (notification is OverscrollNotification) {
-                  if (widget.isExpanded && notification.overscroll < -12) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted && widget.isExpanded) {
-                        widget.onExpandedChanged(false);
-                      }
-                    });
-                  }
-                }
-                return false;
-              },
-              child: ShaderMask(
-                blendMode: BlendMode.dstIn,
-                shaderCallback: (rect) {
-                  if (widget.isExpanded) {
-                    return const LinearGradient(
-                      colors: [Colors.black, Colors.black],
-                    ).createShader(rect);
-                  }
-                  final h = rect.height;
-                  if (h <= 0) {
-                    return const LinearGradient(
-                      colors: [Colors.black, Colors.black],
-                    ).createShader(rect);
-                  }
-                  return const LinearGradient(
-                    colors: [Colors.black, Colors.black],
-                  ).createShader(rect);
-                },
-                child: _buildAppList(displayApps, listBottomPadding),
-              ),
-            ),
-          ),
-        ),
+    return ColoredBox(
+      color: LauncherColors.background,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final topPadding = MediaQuery.paddingOf(context).top;
+          final headerHeight =
+              (constraints.maxHeight * 0.21).clamp(132.0, 200.0);
 
-        // Floating Search Bar positioned neatly ABOVE the persistent dock (no bottom container)
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          child: widget.isExpanded
-              ? Padding(
-                  padding: EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    top: 6,
-                    bottom: widget.dockHeight + 8,
+          return Stack(
+            children: [
+              // Top radial accent glow in the upper 22% header area
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: headerHeight + 80,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        center: const Alignment(0.0, -1.05),
+                        radius: 0.95,
+                        colors: [
+                          widget.accent.withValues(alpha: 0.34),
+                          widget.accent.withValues(alpha: 0.12),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.45, 1.0],
+                      ),
+                    ),
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_query.isNotEmpty && _matchingShortcuts.isNotEmpty) ...[
-                        SizedBox(
-                          height: 36,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _matchingShortcuts.length,
-                            separatorBuilder: (_, _) => const SizedBox(width: 8),
-                            itemBuilder: (context, index) {
-                              final s = _matchingShortcuts[index];
-                              return M3SpringButton(
-                                onTap: () {
-                                  widget.onShortcutTap?.call(s);
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF222624),
-                                    borderRadius: BorderRadius.circular(18),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (s.icon.isNotEmpty) ...[
-                                        Image.memory(s.icon, width: 16, height: 16),
-                                        const SizedBox(width: 6),
-                                      ] else ...[
-                                        Icon(Icons.bolt_rounded, size: 16, color: widget.accent),
-                                        const SizedBox(width: 6),
-                                      ],
-                                      Text(
-                                        s.displayLabel,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12.5,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      Container(
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: widget.accent,
-                          borderRadius: BorderRadius.circular(28),
-                        ),
-                        padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
-                        child: Row(
+                ),
+              ),
+
+              Column(
+                children: [
+                  // Top ~22% Header: Title + App Count (tap to collapse)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => widget.onExpandedChanged(false),
+                    child: SizedBox(
+                      height: headerHeight,
+                      width: double.infinity,
+                      child: Padding(
+                        padding: EdgeInsets.only(top: topPadding + 12),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // Filter / Sort Menu Button
-                            PopupMenuButton<AppSortMode>(
-                          tooltip: 'Sort Apps',
-                          color: const Color(0xFF262626),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          initialValue: widget.sortMode,
-                          onSelected: (mode) {
-                            HapticFeedback.lightImpact();
-                            widget.onSortModeChanged?.call(mode);
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            child: Icon(
-                              Icons.tune_rounded,
-                              color: LauncherColors.readableOn(widget.accent),
-                              size: 22,
-                            ),
-                          ),
-                          itemBuilder: (context) => [
-                            PopupMenuItem(
-                              value: AppSortMode.az,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.arrow_downward_rounded,
-                                    size: 18,
-                                    color: widget.sortMode == AppSortMode.az
-                                        ? widget.accent
-                                        : Colors.white70,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    'A to Z',
-                                    style: TextStyle(
-                                      color: widget.sortMode == AppSortMode.az
-                                          ? widget.accent
-                                          : Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
+                            AnimatedSwitcher(
+                              duration: M3Motion.fastEffects.duration,
+                              child: Text(
+                                showAllApps ? 'All Apps' : 'Apps',
+                                key: ValueKey(showAllApps),
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.6,
+                                  height: 1.1,
+                                ),
                               ),
                             ),
-                            PopupMenuItem(
-                              value: AppSortMode.za,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.arrow_upward_rounded,
-                                    size: 18,
-                                    color: widget.sortMode == AppSortMode.za
-                                        ? widget.accent
-                                        : Colors.white70,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    'Z to A',
-                                    style: TextStyle(
-                                      color: widget.sortMode == AppSortMode.za
-                                          ? widget.accent
-                                          : Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: AppSortMode.recent,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.history_rounded,
-                                    size: 18,
-                                    color: widget.sortMode == AppSortMode.recent
-                                        ? widget.accent
-                                        : Colors.white70,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    'Most Recently Used',
-                                    style: TextStyle(
-                                      color: widget.sortMode == AppSortMode.recent
-                                          ? widget.accent
-                                          : Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
+                            const SizedBox(height: 6),
+                            Text(
+                              '${displayApps.length}',
+                              style: GoogleFonts.plusJakartaSans(
+                                color: widget.accent,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(width: 4),
+                      ),
+                    ),
+                  ),
 
-                        // Nested dark pill text field container
-                        Expanded(
-                          child: Container(
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF181818),
-                              borderRadius: BorderRadius.circular(22),
-                            ),
-                            padding: const EdgeInsets.symmetric(horizontal: 14),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.search_rounded,
-                                  color: Colors.white54,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: TextField(
-                                    controller: _searchController,
-                                    focusNode: _searchFocusNode,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      letterSpacing: -0.2,
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    cursorColor: widget.accent,
-                                    textInputAction: TextInputAction.go,
-                                    onChanged: (val) {
-                                      setState(() => _query = val.trim().toLowerCase());
-                                      if (_scrollController.hasClients) {
-                                        _scrollController.jumpTo(0);
-                                      }
-                                    },
-                                    onSubmitted: (_) {
-                                      if (_query.isEmpty) return;
-                                      final results = _sortedAndFilteredApps;
-                                      if (results.isNotEmpty) {
-                                        widget.onAppTap(results.first);
-                                      } else if (_matchingShortcuts.isNotEmpty) {
-                                        widget.onShortcutTap?.call(_matchingShortcuts.first);
-                                      }
-                                    },
-                                    decoration: const InputDecoration(
-                                      hintText: 'Search for apps',
-                                      hintStyle: TextStyle(
-                                        color: Colors.white38,
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w400,
-                                      ),
-                                      border: InputBorder.none,
-                                      enabledBorder: InputBorder.none,
-                                      focusedBorder: InputBorder.none,
-                                      errorBorder: InputBorder.none,
-                                      disabledBorder: InputBorder.none,
-                                      isDense: true,
-                                      contentPadding: EdgeInsets.zero,
-                                    ),
-                                  ),
-                                ),
-                                if (_query.isNotEmpty)
-                                  GestureDetector(
-                                    onTap: () {
-                                      _searchController.clear();
-                                      setState(() => _query = '');
-                                    },
-                                    child: const Padding(
-                                      padding: EdgeInsets.symmetric(horizontal: 4),
-                                      child: Icon(
-                                        Icons.close_rounded,
-                                        color: Colors.white54,
-                                        size: 18,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
+                  // Right-aligned Categorized / All Apps mode toggle
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        _buildModeToggleButton(
+                          icon: Icons.filter_list_rounded,
+                          active: !showAllApps,
+                          inactiveSurface: cardSurface,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setState(() {
+                              _isCategorized = true;
+                              _isSearchOpen = false;
+                              _query = '';
+                              _searchController.clear();
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 6),
+                        _buildModeToggleButton(
+                          icon: Icons.grid_view_rounded,
+                          active: showAllApps,
+                          inactiveSurface: cardSurface,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _isCategorized = false);
+                          },
                         ),
                       ],
                     ),
                   ),
+
+                  // Bottom ~75-78% Apps Container
+                  Expanded(
+                    child: Listener(
+                      onPointerDown: (_) {
+                        _dragDownDistance = 0;
+                        _expandedTriggeredThisDrag = false;
+                      },
+                      onPointerMove: (event) {
+                        if (_expandedTriggeredThisDrag) return;
+                        if (widget.isExpanded) {
+                          final isAtTop =
+                              !_scrollController.hasClients ||
+                              _scrollController.offset <= 0;
+                          if (isAtTop && event.delta.dy > 0) {
+                            _dragDownDistance += event.delta.dy;
+                            if (_dragDownDistance > 24) {
+                              _expandedTriggeredThisDrag = true;
+                              widget.onExpandedChanged(false);
+                            }
+                          } else {
+                            _dragDownDistance = 0;
+                          }
+                        }
+                      },
+                      onPointerUp: (_) {
+                        _dragDownDistance = 0;
+                        _expandedTriggeredThisDrag = false;
+                      },
+                      onPointerCancel: (_) {
+                        _dragDownDistance = 0;
+                        _expandedTriggeredThisDrag = false;
+                      },
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          if (notification is OverscrollNotification &&
+                              widget.isExpanded &&
+                              notification.overscroll < -12) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted && widget.isExpanded) {
+                                widget.onExpandedChanged(false);
+                              }
+                            });
+                          }
+                          return false;
+                        },
+                        child: AnimatedSwitcher(
+                          duration: M3Motion.fastEffects.duration,
+                          switchInCurve: M3Motion.fastEffects,
+                          switchOutCurve: M3Motion.fastEffects,
+                          child: showAllApps
+                              ? KeyedSubtree(
+                                  key: const ValueKey('all-apps-body'),
+                                  child: _buildAllAppsBody(
+                                    displayApps,
+                                    cardSurface,
+                                    tileSurface,
+                                  ),
+                                )
+                              : KeyedSubtree(
+                                  key: const ValueKey('categorized-body'),
+                                  child: _buildCategorizedBody(
+                                    displayApps,
+                                    cardSurface,
+                                    tileSurface,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
-            )
-          : const SizedBox(width: double.infinity, height: 0),
-        ),
-      ],
-    );
-  }
-}
 
-class _PanelHandle extends StatefulWidget {
-  const _PanelHandle({
-    required this.onToggle,
-    required this.onDragUp,
-    required this.onDragDown,
-  });
-
-  final VoidCallback onToggle;
-  final VoidCallback onDragUp;
-  final VoidCallback onDragDown;
-
-  @override
-  State<_PanelHandle> createState() => _PanelHandleState();
-}
-
-class _PanelHandleState extends State<_PanelHandle> {
-  double _dragDelta = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: widget.onToggle,
-      onVerticalDragStart: (_) => _dragDelta = 0,
-      onVerticalDragUpdate: (details) {
-        _dragDelta += details.delta.dy;
-        if (_dragDelta < -12) {
-          widget.onDragUp();
-        } else if (_dragDelta > 12) {
-          widget.onDragDown();
-        }
-      },
-      child: SizedBox(
-        height: dragHandleHeight,
-        width: double.infinity,
-        child: Center(
-          child: Container(
-            width: 38,
-            height: 4,
-            decoration: const BoxDecoration(
-              color: LauncherColors.dragHandle,
-              borderRadius: BorderRadius.all(Radius.circular(2)),
-            ),
-          ),
-        ),
+              // Floating Search Button (bottom-right)
+              Positioned(
+                right: 22,
+                bottom: widget.dockHeight + 18,
+                child: M3SpringButton(
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+                    setState(() {
+                      _isSearchOpen = !_isSearchOpen;
+                      if (_isSearchOpen) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) _searchFocusNode.requestFocus();
+                        });
+                      } else {
+                        _query = '';
+                        _searchController.clear();
+                        _searchFocusNode.unfocus();
+                      }
+                    });
+                  },
+                  pressedScale: 0.90,
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: widget.accent,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      _isSearchOpen ? Icons.close_rounded : Icons.search_rounded,
+                      color: LauncherColors.readableOn(widget.accent),
+                      size: 26,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
